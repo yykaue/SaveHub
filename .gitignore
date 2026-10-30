@@ -1,0 +1,47 @@
+# Dependencies and package-manager cache
+node_modules/
+/.pnpm-store/
+
+# Generated build output (build/ contains source icons and must stay tracked)
+/dist/
+/release/
+*.tsbuildinfo
+
+# Local game data, disposable test fixtures and recovery checkpoints
+/.local-data/
+/.test-data/
+
+# Generated test results and release audits; keep authored Markdown documents
+/test-results/
+/playwright-report/
+/coverage/
+/docs/screenshots/
+/docs/release-audit.json
+/docs/release-audit-*.json
+/docs/original-release-preserved.json
+
+# Local environment values; example files can be committed
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local logs (do not hide log fixtures elsewhere in the source tree)
+/logs/
+/*.log
+
+# Editor state; allow shared VS Code configuration
+/.idea/
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings.json
+!/.vscode/launch.json
+!/.vscode/tasks.json
+*.swp
+*.swo
+
+# Windows and macOS metadata
+.DS_Store
+._*
+Thumbs.db
+[Dd]esktop.ini

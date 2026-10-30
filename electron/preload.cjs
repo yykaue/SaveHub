@@ -1,0 +1,28 @@
+const { contextBridge, ipcRenderer } = require('electron');
+const invoke = async (method, ...args) => {
+  const result = await ipcRenderer.invoke(`savehub:${method}`, ...args);
+  if (!result.ok) throw new Error(result.error);
+  return result.data;
+};
+contextBridge.exposeInMainWorld('savehub', {
+  state: () => invoke('state'),
+  setTheme: theme => invoke('setTheme', theme),
+  saveGame: game => invoke('saveGame', game),
+  removeGame: (id, undo) => invoke('removeGame', id, undo),
+  pickDirectory: () => invoke('pickDirectory'),
+  pickIcon: () => invoke('pickIcon'),
+  saveSnapshot: (id, details) => invoke('saveSnapshot', id, details),
+  restoreSnapshot: (gameId, id) => invoke('restoreSnapshot', gameId, id),
+  updateSnapshot: (gameId, id, details) => invoke('updateSnapshot', gameId, id, details),
+  updateSnapshots: (gameId, ids, details) => invoke('updateSnapshots', gameId, ids, details),
+  verifySnapshot: (gameId, id) => invoke('verifySnapshot', gameId, id),
+  importSnapshots: (id, useLegacy) => invoke('importSnapshots', id, useLegacy),
+  exportSnapshot: (gameId, id) => invoke('exportSnapshot', gameId, id),
+  exportSnapshots: (gameId, ids) => invoke('exportSnapshots', gameId, ids),
+  openFolder: (kind, id) => invoke('openFolder', kind, id),
+  onProgress: callback => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('savehub:progress', listener);
+    return () => ipcRenderer.removeListener('savehub:progress', listener);
+  },
+});

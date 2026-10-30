@@ -1,0 +1,52 @@
+name: Build SaveHub
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: macos-latest
+            target: mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm test:ui
+      - run: pnpm test:interactions
+      - run: pnpm dist:${{ matrix.target }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - if: matrix.target == 'win'
+        run: node scripts/portable-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SaveHub-${{ matrix.target }}
+          path: |
+            release/**/*.exe
+            release/**/*.dmg
+            release/**/*.zip
+            docs/screenshots/verification.json
+            docs/screenshots/interaction-verification.json
+            docs/screenshots/portable-verification.json
+          if-no-files-found: error

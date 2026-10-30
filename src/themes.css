@@ -1,0 +1,85 @@
+:root, [data-theme='ink'] {
+  color-scheme: light;
+  --bg: #f8f7f3; --app-background: #f8f7f3; --sidebar: #f0efe9; --surface: #fdfcf9;
+  --text: #343934; --muted: #70776e; --faint: #92998c; --accent: #4b5551; --accent-soft: #5c665b0e;
+  --green: #899b70; --warning: #b99b66; --red: #b76553; --safety: #7a8d77; --favorite: #a5945a;
+  --line: #dfdfd64f; --line-strong: #d9dcd0; --scrollbar: #b9bdab6b;
+  --hover: #e4e7dc6e; --nav-active: #e3e8da; --nav-shadow: none; --storage-bg: #e9ebe280;
+  --radius: 10px; --radius-sm: 6px; --display-font: 'Songti SC', 'STSong', 'SimSun', serif;
+  --hero-bg: #efefe7; --hero-border: #dfe2d6; --hero-shadow: none;
+  --button-bg: #414c47; --button-text: #f9faf6; --button-border: #3b4641; --button-shadow: 0 3px 7px #4c58371a; --button-shadow-hover: 0 5px 12px #4c58372a;
+  --subtle-button: #ffffff45; --input-bg: #fffefa; --tab-track: #f0f0e9; --tab-active: #fdfdfa;
+  --table-head: #f4f5ef; --row-hover: #eef1e749; --banner-bg: #eeeee66b; --empty-bg: #f5f5ee55; --icon-bg: #e9ede04d;
+  --panel-shadow: 0 3px 8px #4b543202; --modal-bg: #faf9f5; --overlay: #2c322c59;
+  --logo-cutout: #f5f6ee; --texture-opacity: .065;
+  --art-sky: #e6e8e0; --art-ground: #e2e5dc; --art-sun: #fffef0; --art-far: #a1a59a; --art-near: #777e74; --art-mist: #ebeee6; --art-ink: #626d60;
+}
+[data-theme='ink'] .mountain-layer { filter: blur(.65px); }
+[data-theme='tech'] {
+  color-scheme: light;
+  --bg: #edf8fd; --app-background: radial-gradient(ellipse at 75% 0%, #ffffff 0%, #edf9fe 40%, #e7f4fa 100%); --sidebar: #e4f3fa9c; --surface: #ffffffad;
+  --text: #234458; --muted: #597d93; --faint: #7f9eaf; --accent: #138aae; --accent-soft: #29c4f018;
+  --green: #2eb7b9; --warning: #b59455; --red: #d15f75; --safety: #1896b7; --favorite: #1eacc7;
+  --line: #b7ddeb80; --line-strong: #b0dbe9; --scrollbar: #95c6da70;
+  --hover: #b8eaf735; --nav-active: linear-gradient(110deg, #ffffffc9, #b6eaf555); --nav-shadow: inset 0 0 0 1px #fff, 0 2px 14px #66d1ee13; --storage-bg: #effcff9e;
+  --radius: 12px; --radius-sm: 6px; --display-font: 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --hero-bg: #e4f5fc; --hero-border: #fff; --hero-shadow: 0 0 0 1px #bbe2f1, 0 8px 24px #8fcee929, inset 0 0 22px #fff;
+  --button-bg: linear-gradient(135deg, #41b8d6, #1688b7); --button-text: #fff; --button-border: #76cce3; --button-shadow: 0 4px 14px #26a5cc30, inset 0 1px 0 #ffffff60; --button-shadow-hover: 0 6px 25px #26a5cc50;
+  --subtle-button: #ffffff75; --input-bg: #faffffb3; --tab-track: #dff1f85e; --tab-active: #fff;
+  --table-head: #effaffb3; --row-hover: #e6f9ff6b; --banner-bg: #edfaff9c; --empty-bg: #f8fdff75; --icon-bg: #dff6ff70;
+  --panel-shadow: 0 4px 18px #6ab7d409, inset 0 1px 0 #fff; --modal-bg: #f5fcff; --overlay: #25495a52;
+  --logo-cutout: #fff; --texture-opacity: 0;
+  --art-sky: #b8e7f6; --art-ground: #d1effa; --art-sun: #fff; --art-far: #72bedb; --art-near: #4798b3; --art-mist: #dcf7ff; --art-ink: #4799b9;
+}
+[data-theme='tech'] .game-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(#ffffff26 1px, transparent 1px), linear-gradient(90deg, #ffffff26 1px, transparent 1px); background-size: 32px 32px; mask-image: linear-gradient(90deg, transparent 30%, black); }
+[data-theme='tech'] .hero-title h2 { font-weight: 400; letter-spacing: 3px; }
+[data-theme='tech'] .ink-seal { color: #56bdd6; border-color: #92d6e8; box-shadow: 0 0 15px #43c7ef30; transform: rotate(0); font-family: sans-serif; }
+[data-theme='tech'] .stats-row { border-top-color: #fff; }
+[data-theme='tech'] .status-dot:not(.warning) { box-shadow: 0 0 8px #21c5df55, 0 0 0 3px #1bbadf0c; }
+[data-theme='cyber'] {
+  color-scheme: dark;
+  --bg: #111220; --app-background: radial-gradient(ellipse at 100% 0%, #24203b88, transparent 55%), #111220; --sidebar: #151525eb; --surface: #1a1c2ec9;
+  --text: #e3e4f7; --muted: #9899b7; --faint: #70738f; --accent: #53dbea; --accent-soft: #3dc8ed12;
+  --green: #51f2c4; --warning: #f6b56c; --red: #fa6eaf; --safety: #ad8ef8; --favorite: #ee72dc;
+  --line: #39394c80; --line-strong: #43425b; --scrollbar: #7d66b350;
+  --hover: #655db622; --nav-active: linear-gradient(100deg, #32445d80, #27243f60); --nav-shadow: inset 2px 0 0 #50d9e7; --storage-bg: #24213770;
+  --radius: 5px; --radius-sm: 3px; --display-font: 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --hero-bg: #191a32; --hero-border: #614271; --hero-shadow: 2px 0 0 #46c4dc4d, -2px 0 0 #f04fd333, 0 4px 30px #d53af30a;
+  --button-bg: linear-gradient(115deg, #cf3db6, #8d4fda); --button-text: #fff0fe; --button-border: #ed75e08f; --button-shadow: 0 0 15px #e448e22b, inset 0 1px 0 #ffb6f322; --button-shadow-hover: 0 0 25px #e448e260;
+  --subtle-button: #202135aa; --input-bg: #17192b; --tab-track: #151627; --tab-active: #2a2941;
+  --table-head: #202135; --row-hover: #37304d4a; --banner-bg: #30213f88; --empty-bg: #1a1b2b88; --icon-bg: #2b435333;
+  --panel-shadow: inset 0 1px 0 #8583e70a, 0 5px 15px #00000009; --modal-bg: #1c1d30; --overlay: #080916ac;
+  --logo-cutout: #142433; --texture-opacity: 0;
+  --art-sky: #262346; --art-ground: #1c2038; --art-sun: #ed4dce; --art-far: #6e55a4; --art-near: #4e507e; --art-mist: #292947; --art-ink: #48cce2;
+}
+[data-theme='cyber'] .game-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, #bc52df08 0, #bc52df08 1px, transparent 1px, transparent 5px); }
+[data-theme='cyber'] .hero-title h2 { letter-spacing: 3px; text-shadow: 1.5px 0 #fb40b981, -1px 0 #5cdff96b; }
+[data-theme='cyber'] .hero-title > svg { filter: drop-shadow(0 0 6px #4ed7e570); }
+[data-theme='cyber'] .ink-seal { transform: skewY(-6deg); font-family: monospace; box-shadow: 3px 1px 0 #44cde780, -2px -1px 0 #ee63db60; border-color: #eb5abf; }
+[data-theme='cyber'] .hero-kicker::after { content: '// SAVE_POINT'; color: #c367c1; font-size: 8px; letter-spacing: 2px; margin-left: 8px; }
+[data-theme='cyber'] .button.primary { clip-path: polygon(0 0, 94% 0, 100% 23%, 100% 100%, 6% 100%, 0 77%); }
+[data-theme='cyber'] .page-heading h1 { font-size: 25px; font-weight: 500; }
+[data-theme='cyber'] .brand > span { letter-spacing: .3px; }
+[data-theme='glass'] {
+  color-scheme: light;
+  --bg: #eae7f1; --app-background: radial-gradient(ellipse at 92% 0%, #a9d9e1bb, transparent 53%), radial-gradient(ellipse at 25% 100%, #bea8dfa0, transparent 62%), radial-gradient(ellipse at 87% 73%, #f4c9bcaa, transparent 48%), #efecf4; --sidebar: #ffffff29; --surface: #ffffff4d;
+  --text: #4c4963; --muted: #817b99; --faint: #a49cb3; --accent: #8770a6; --accent-soft: #9474b915;
+  --green: #82a5a1; --warning: #bb9b7d; --red: #ba7897; --safety: #7b9ba5; --favorite: #ad84b4;
+  --line: #ffffff75; --line-strong: #ffffffc4; --scrollbar: #aaa1bb70;
+  --hover: #ffffff59; --nav-active: linear-gradient(115deg, #ffffff8a, #ffffff3a); --nav-shadow: inset 0 1px 0 #ffffffc9, 0 5px 18px #756a8810; --storage-bg: #ffffff29;
+  --radius: 16px; --radius-sm: 8px; --display-font: 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --hero-bg: #e4dfeeb3; --hero-border: #ffffffb8; --hero-shadow: 0 8px 30px #6c648914, inset 0 1px 0 #ffffffbd;
+  --button-bg: linear-gradient(135deg, #a48bbb, #8774a3); --button-text: #fff; --button-border: #b9a9ca; --button-shadow: 0 4px 15px #8e76aa29, inset 0 1px 0 #ffffff47; --button-shadow-hover: 0 6px 22px #8e76aa45;
+  --subtle-button: #ffffff49; --input-bg: #ffffff63; --tab-track: #ffffff29; --tab-active: #ffffffb5;
+  --table-head: #ffffff3b; --row-hover: #ffffff45; --banner-bg: #ffffff36; --empty-bg: #ffffff2e; --icon-bg: #ffffff66;
+  --panel-shadow: 0 8px 24px #776e8a0c, inset 0 1px 0 #ffffffa3; --modal-bg: #f4f1f8; --overlay: #65557740;
+  --logo-cutout: #faf5ff; --texture-opacity: 0;
+  --art-sky: #c1d3e0; --art-ground: #dbd6e9; --art-sun: #fff3e5; --art-far: #9e92b3; --art-near: #8e82a4; --art-mist: #e5e2ef; --art-ink: #9b89ac;
+}
+[data-theme='glass'] .game-hero { backdrop-filter: blur(25px); }
+[data-theme='glass'] .game-hero > .landscape { opacity: .58; }
+[data-theme='glass'] .hero-title h2 { font-weight: 400; letter-spacing: 2px; }
+[data-theme='glass'] .hero-shade { background: linear-gradient(90deg, #efeaf4e6 0%, #efeaf4aa 25%, transparent 75%); }
+[data-theme='glass'] .ink-seal { color: #a183ad; border-color: #ffffffb0; box-shadow: inset 0 0 0 2px #ffffff1f, 0 2px 10px #947fa522; background: #ffffff30; border-radius: 7px; font-family: sans-serif; transform: rotate(0); }
+[data-theme='glass'] .page-heading h1 { font-size: 26px; font-weight: 400; }
+[data-theme='glass'] .game-nav > button.selected { backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 #ffffff7a; }
