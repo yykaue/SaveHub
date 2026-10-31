@@ -42,6 +42,7 @@ export function SnapshotList({ game, view, busy, menu, onMenu, onViewChange, onA
   const ordinaryCount = game.snapshots.filter(snapshot => matchesFilter(snapshot, 'all')).length;
   const selectedProtected = selected.filter(snapshot => snapshot.protected).length;
   const selectedPending = selected.some(snapshot => snapshot.purgePending);
+  const selectedTrashed = selected.some(snapshot => snapshot.deletedAt);
   const protectSelected = !selected.length || selectedProtected !== selected.length;
   const protectAll = !saves.length || !saves.every(snapshot => snapshot.protected);
   const nextDirection = (key: SortKey) => key === sort.key ? sort.direction === 'asc' ? 'desc' : 'asc' : key === 'createdAt' ? 'desc' : 'asc';
@@ -56,7 +57,7 @@ export function SnapshotList({ game, view, busy, menu, onMenu, onViewChange, onA
   const menus = (snapshot: Snapshot) => <div className={`dropdown ${menuAbove ? 'above' : ''}`} role="menu" onClick={event => event.stopPropagation()}>
     <button role="menuitem" onClick={() => action('detail', snapshot)}><Info size={15}/>存档详情</button>
     <button role="menuitem" disabled={snapshot.corrupted || snapshot.purgePending || busy} onClick={() => action('edit', snapshot)}><Pencil size={15}/>编辑名称和备注</button>
-    <button role="menuitem" disabled={snapshot.corrupted || snapshot.purgePending || busy} onClick={() => action('protect', snapshot)}><ShieldCheck size={15}/>{snapshot.protected ? '取消保护标记' : '标记为保护存档'}</button>
+    <button role="menuitem" disabled={!!snapshot.deletedAt || snapshot.corrupted || snapshot.purgePending || busy} title={snapshot.deletedAt ? '请先找回存档，再修改保护标记' : undefined} onClick={() => action('protect', snapshot)}><ShieldCheck size={15}/>{snapshot.protected ? '取消保护标记' : '标记为保护存档'}</button>
     <button role="menuitem" disabled={snapshot.corrupted || snapshot.purgePending || busy} onClick={() => action('verify', snapshot)}><ShieldCheck size={15}/>校验完整性</button>
     <button role="menuitem" disabled={snapshot.corrupted || snapshot.purgePending || busy} onClick={() => action('export', snapshot)}><Download size={15}/>导出存档</button>
     <div className="menu-divider"/>
@@ -81,11 +82,11 @@ export function SnapshotList({ game, view, busy, menu, onMenu, onViewChange, onA
       <label className="search-field"><Search size={15}/><input placeholder="搜索名称或备注…" aria-label="搜索存档" value={query} onChange={event => onViewChange({ query: event.target.value, selectedIds: [] })}/>{query && <button title="清空搜索" onClick={() => onViewChange({ query: '', selectedIds: [] })}><X size={13}/></button>}</label>
     </div>
     <div className={`batch-toolbar ${selected.length ? 'has-selection' : ''}`}>
-      <span className="selection-summary" aria-live="polite">{selected.length ? <>已选 <strong>{selected.length}</strong> 份{selectedProtected > 0 && ' · 含保护存档，删除前需取消保护'}</> : '勾选存档，可批量保护、删除或导出'}</span>
+      <span className="selection-summary" aria-live="polite">{selected.length ? <>已选 <strong>{selected.length}</strong> 份{selectedProtected > 0 && (filter === 'trash' ? ' · 含保护存档，需找回并取消保护后才能删除' : ' · 含保护存档，删除前需取消保护')}</> : filter === 'trash' ? '勾选存档，可批量找回、永久删除或导出' : '勾选存档，可批量保护、删除或导出'}</span>
       {selected.length > 0 && <button className="text-button clear-selection" disabled={busy} onClick={() => onViewChange({ selectedIds: [] })}>取消选择</button>}
       <div className="batch-actions">
-        <button className="button secondary small" disabled={!selected.length || selectedPending || busy} onClick={() => onProtect(selected.map(snapshot => snapshot.id), protectSelected)}><ShieldCheck size={14}/>{protectSelected ? '保护所选' : '取消保护所选'}</button>
-        <button className="button secondary small" disabled={!saves.length || busy} title="处理本游戏全部未删除的手动及导入记录，包含保护存档；不受搜索和筛选影响，不含回收站与读档恢复点。全部已保护时取消保护，否则统一保护。" onClick={() => onProtect('all', protectAll)}><ShieldCheck size={14}/>{protectAll ? '保护全部' : '取消保护全部'}</button>
+        <button className="button secondary small" disabled={filter === 'trash' || !selected.length || selectedTrashed || selectedPending || busy} title={filter === 'trash' || selectedTrashed ? '请先找回存档，再修改保护标记' : undefined} onClick={() => onProtect(selected.map(snapshot => snapshot.id), protectSelected)}><ShieldCheck size={14}/>{protectSelected ? '保护所选存档' : '取消保护所选存档'}</button>
+        <button className="button secondary small" disabled={!saves.length || busy} title="处理本游戏全部未删除的手动及导入记录，包含保护存档；不受搜索和筛选影响，不含回收站与读档恢复点。全部已保护时取消保护，否则统一保护。" onClick={() => onProtect('all', protectAll)}><ShieldCheck size={14}/>{protectAll ? '保护全部存档' : '取消保护全部存档'}</button>
         {filter === 'trash' && <button className="button secondary small" disabled={!selected.length || selectedPending || busy} onClick={() => onRecover(selected.map(snapshot => snapshot.id))}><RotateCcw size={14}/>找回所选</button>}
         <button className="button secondary small danger-text" disabled={!selected.length || busy || selectedProtected > 0} title={selectedProtected ? '所选记录含保护存档，请先取消保护标记' : undefined} onClick={() => onDelete(selected)}><Trash2 size={14}/>{filter === 'trash' ? '永久删除所选' : '删除所选'}</button>
         <button className="button secondary small" disabled={!selected.length || selectedPending || busy} onClick={() => onExport(selected.map(snapshot => snapshot.id))}><Download size={14}/>导出所选</button>

@@ -109,6 +109,7 @@ export default function App() {
     if (report) setModal({ type: 'import-report', report });
   };
   const snapshotAction = (action: SnapshotAction, snapshot: Snapshot) => {
+    if (action === 'protect' && snapshot.deletedAt) { setToast({ text: '请先从回收站找回存档，再修改保护标记。', error: true }); return; }
     if (action === 'delete' && snapshot.protected) { setToast({ text: '保护存档不可删除，请先取消保护标记。', error: true }); return; }
     if (action === 'delete') { requestDelete([snapshot], snapshot.kind === 'safety' ? 'restore-points' : undefined); return; }
     if (action === 'detail' || action === 'restore') { setModal({ type: action, snapshot }); return; }

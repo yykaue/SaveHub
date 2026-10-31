@@ -177,6 +177,13 @@ function exportName(label) {
 
 const foldedName = name => name.normalize('NFC').toLowerCase();
 
+function uniqueExportName(base, taken) {
+  let name = base, suffix = 2;
+  while (taken.has(foldedName(name))) name = `${base} (${suffix++})`;
+  taken.add(foldedName(name));
+  return name;
+}
+
 export class SaveStore {
   constructor(dataDir, { platform = process.platform, onProgress = () => {}, fault = async () => {} } = {}) {
     this.dataDir = path.resolve(dataDir);
@@ -406,6 +413,7 @@ export class SaveStore {
       if ('favorite' in changes) meta.favorite = Boolean(changes.favorite);
       if ('protected' in changes) {
         if (meta.kind === 'safety') throw new Error('自动恢复点不能作为普通存档标记。');
+        if (meta.deletedAt) throw new Error('请先从回收站找回存档，再修改保护标记。');
         meta.protected = Boolean(changes.protected);
       }
       if ('deleted' in changes) { if (changes.deleted) meta.deletedAt = new Date().toISOString(); else delete meta.deletedAt; }
@@ -435,6 +443,7 @@ export class SaveStore {
       if (metas.some(meta => meta.purgePending)) throw new Error('所选记录包含尚未完成永久删除的项目，不能找回或修改。');
       if (changes.deleted && metas.some(meta => meta.protected)) throw new Error('所选记录中有保护存档，请先取消保护标记后再删除。');
       if ('protected' in changes && metas.some(meta => meta.kind === 'safety')) throw new Error('自动恢复点不能作为普通存档标记。');
+      if ('protected' in changes && metas.some(meta => meta.deletedAt)) throw new Error('所选记录包含回收站存档，请先找回，再修改保护标记。');
       const report = { updated: [], failed: [] };
       const timestamp = new Date().toISOString();
       for (const meta of metas) {
@@ -653,7 +662,7 @@ export class SaveStore {
 
   async exportSnapshot(gameId, id, destination) {
     const result = await this.exportSnapshots(gameId, [id], destination);
-    return path.join(result.folder, result.directories[0]);
+    return result.folder;
   }
 
   async exportIndexCandidates(root, onlyFolder) {
@@ -703,47 +712,48 @@ export class SaveStore {
       for (const id of selected) metas.push(await this.verify(gameId, id));
       const batchId = randomUUID();
       const stage = path.join(destination, `.savehub-export-${batchId}`);
-      const indexDir = path.join(destination, EXPORT_INDEX);
-      await assertNoLinks(indexDir);
-      const indexStat = await statMaybe(indexDir);
-      if (indexStat && !indexStat.isDirectory()) throw new Error('导出位置中已有同名的清单文件，请选择其他位置。');
-      const taken = new Set((await fs.readdir(destination)).map(foldedName));
-      // Keep old index mappings unambiguous even if a previously exported folder was moved.
-      for (const candidate of await this.exportIndexCandidates(destination) || []) taken.add(foldedName(path.basename(candidate.exported)));
-      taken.add(EXPORT_INDEX);
-      const directories = metas.map(meta => {
-        const base = exportName(meta.label);
-        let name = base, suffix = 2;
-        while (taken.has(foldedName(name))) name = `${base} (${suffix++})`;
-        taken.add(foldedName(name));
-        return name;
-      });
+      const existing = new Set((await fs.readdir(destination)).map(foldedName));
+      // Old unwrapped exports may retain index entries after a named folder is moved.
+      // Reserve those names so importing the new bundle cannot resolve to an old entry.
+      for (const candidate of await this.exportIndexCandidates(destination) || []) existing.add(foldedName(path.basename(candidate.exported)));
+      const folder = path.join(destination, uniqueExportName(`${exportName(game.name)}-存档导出`, existing));
+      const indexDir = path.join(folder, EXPORT_INDEX);
+      const taken = new Set([EXPORT_INDEX]);
+      const directories = metas.map(meta => uniqueExportName(exportName(meta.label), taken));
       const published = [];
       const indexFile = path.join(indexDir, `${batchId}.json`);
+      let folderCreated = false;
       await fs.mkdir(stage);
       try {
         for (const [index, meta] of metas.entries()) {
           this.onProgress({ phase: 'exporting', completed: index, total: metas.length, detail: meta.label });
           await this.writeExport(gameId, meta, path.join(stage, directories[index]));
         }
-        // All payloads are verified before publishing. mkdir claims each destination
-        // without replacing a folder created by another process after our preflight.
-        await fs.mkdir(indexDir, { recursive: true });
+        // Claim a fresh bundle only after all payloads are verified. Never replace
+        // a folder created by another process after our name preflight.
+        await this.fault('before-export-bundle-publish', { folder });
+        await fs.mkdir(folder);
+        folderCreated = true;
+        await fs.mkdir(indexDir);
         for (const name of directories) {
-          const target = path.join(destination, name), source = path.join(stage, name);
-          await this.fault('before-export-publish', { directory: name });
+          const target = path.join(folder, name), source = path.join(stage, name);
+          await this.fault('before-export-publish', { directory: name, folder });
           await fs.mkdir(target);
           published.push(target);
           for (const child of await fs.readdir(source)) await fs.rename(path.join(source, child), path.join(target, child));
         }
         await atomicJson(indexFile, { version: 2, type: 'savehub-collection', gameId, gameName: game.name, exportedAt: new Date().toISOString(), snapshots: metas.map((manifest, index) => ({ directory: directories[index], manifest })) });
-        return { folder: destination, count: metas.length, directories, indexFile };
+        return { folder, count: metas.length, directories, indexFile };
       } catch (error) {
-        for (const folder of published) {
-          if (!within(destination, folder) || folder === destination) throw new Error('导出清理目录越界。');
-          await fs.rm(folder, { recursive: true, force: true });
+        for (const target of published) {
+          if (!within(destination, folder) || folder === destination || !within(folder, target) || target === folder) throw new Error('导出清理目录越界。');
+          await fs.rm(target, { recursive: true, force: true });
         }
-        if (!indexStat) await fs.rmdir(indexDir).catch(() => {});
+        if (folderCreated) {
+          // Remove only empty containers so concurrent, unrelated files survive.
+          await fs.rmdir(indexDir).catch(() => {});
+          await fs.rmdir(folder).catch(() => {});
+        }
         throw error;
       } finally {
         // This uniquely named, owned staging folder is always inside the chosen destination.

@@ -68,7 +68,7 @@ try {
   await expect(row(pending.id)).toContainText('永久删除未完成');
   await expect(row(pending.id).getByRole('button', { name: '找回', exact: true })).toBeDisabled();
   await row(pending.id).getByRole('checkbox').check();
-  for (const name of ['找回所选', '保护所选', '导出所选']) await expect(page.getByRole('button', { name, exact: true })).toBeDisabled();
+  for (const name of ['找回所选', '保护所选存档', '导出所选']) await expect(page.getByRole('button', { name, exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '永久删除所选', exact: true }).click();
   await expect(dialog).toContainText('永久删除，无法恢复');
   await confirm('确认永久删除 1 份'); await expect(rows).toHaveCount(3);
@@ -149,22 +149,28 @@ try {
   await dialog.getByRole('button', { name: '关闭', exact: true }).click();
   done('Restore points support select-all removal; removed points support selected and select-all physical deletion at minimum window size');
 
-  await page.evaluate(async ({ gameId, id }) => {
-    await window.savehub.updateSnapshot(gameId, id, { protected: false });
-    await window.savehub.updateSnapshot(gameId, id, { deleted: true });
-    await window.savehub.updateSnapshot(gameId, id, { protected: true });
-  }, { gameId, id: kept.id });
+  // Reproduce an older version's protected trash record without bypassing the new API guard.
+  await atomicJson(path.join(store.snapshotDir(gameId, kept.id), 'manifest.json'), { ...await store.readSnapshot(gameId, kept.id), deletedAt: new Date().toISOString() });
   await page.reload(); await tab('回收站'); await expect(rows).toHaveCount(1);
   await all.check(); await expect(page.getByRole('button', { name: '永久删除所选', exact: true })).toBeDisabled();
   await row(kept.id).getByRole('button', { name: /更多操作$/ }).click();
   await expect(page.getByRole('menuitem', { name: '永久删除', exact: true })).toBeDisabled();
+  await expect(page.getByRole('menuitem', { name: '取消保护标记', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '取消保护所选存档', exact: true })).toBeDisabled();
+  await page.getByRole('menuitem', { name: '找回存档', exact: true }).click(); await idle();
+  await tab('保护存档'); await expect(rows).toHaveCount(1);
+  await row(kept.id).getByRole('button', { name: /更多操作$/ }).click();
   await page.getByRole('menuitem', { name: '取消保护标记', exact: true }).click(); await idle();
+  await tab('全部存档');
+  await all.check();
+  await page.getByRole('button', { name: '删除所选', exact: true }).click(); await confirm('移入回收站');
+  await tab('回收站'); await all.check();
   await page.getByRole('button', { name: '永久删除所选', exact: true }).click(); await confirm('确认永久删除 1 份');
   await expect(rows).toHaveCount(0);
   assert.deepEqual(await fs.readdir(path.dirname(store.snapshotDir(gameId, kept.id))), []);
   assert.equal(await fs.readFile(path.join(source, 'saves/progress.dat'), 'utf8'), 'live-game-progress');
   assert.equal(await fs.readFile(path.join(source, 'unmanaged.txt'), 'utf8'), 'keep-unmanaged-file');
-  done('Protected trash records block both permanent-delete controls until unprotected; all live game files remain unchanged');
+  done('Legacy protected trash records require recovery before unprotecting and deleting; all live game files remain unchanged');
 
   assert.deepEqual(errors, []);
   const report = { success: true, date: new Date().toISOString(), executable: process.env.SAVEHUB_TEST_EXECUTABLE || 'Electron development runtime', fixture: 'Isolated synthetic saves; permanent deletion never touches real game data.', checks, rendererErrors: errors };

@@ -144,6 +144,8 @@ test('export all includes favorite and protected saves but excludes trash and re
   const destination = path.join(base, 'exports'); await fs.mkdir(destination);
   const result = await store.exportSnapshots(id, 'all', destination);
   assert.equal(result.count, 4);
+  assert.deepEqual(await fs.readdir(destination), [path.basename(result.folder)]);
+  assert.equal(path.dirname(result.folder), destination);
   const collection = JSON.parse(await read(result.indexFile));
   assert.deepEqual(collection.snapshots.map(item => item.manifest.id).sort(), [ordinary.id, favorite.id, protectedSave.id, imported.id].sort());
   assert.equal((await fs.readdir(result.folder)).length, 5);
@@ -173,7 +175,8 @@ test('permanent deletion preflights all records and refuses active, protected, d
   const { store, id, input } = await fixture(t);
   const trash = await save(store, id, '待删除'), active = await save(store, id, '仍在使用'), protectedSave = await save(store, id, '保护');
   await store.updateSnapshots(id, [trash.id, protectedSave.id], { deleted: true });
-  await store.updateSnapshot(id, protectedSave.id, { protected: true, favorite: true });
+  // Simulate a protected trash record created by an older version.
+  await atomicJson(path.join(store.snapshotDir(id, protectedSave.id), 'manifest.json'), { ...await store.readSnapshot(id, protectedSave.id), protected: true, favorite: true });
   const otherId = await store.upsertGame({ ...input, name: '另一个游戏' });
   const foreign = await save(store, otherId);
   for (const ids of [[trash.id, active.id], [trash.id, protectedSave.id], [trash.id, trash.id], [trash.id, foreign.id], [trash.id, '../escape'], []]) {
@@ -183,7 +186,10 @@ test('permanent deletion preflights all records and refuses active, protected, d
   }
   await assert.rejects(store.deleteSnapshots(id, 'all'));
   assert.equal((await store.readSnapshot(id, protectedSave.id)).protected, true);
+  await assert.rejects(store.updateSnapshot(id, protectedSave.id, { protected: false }), /先.*找回/);
+  await store.updateSnapshot(id, protectedSave.id, { deleted: false });
   await store.updateSnapshot(id, protectedSave.id, { protected: false });
+  await store.updateSnapshot(id, protectedSave.id, { deleted: true });
   assert.deepEqual((await store.deleteSnapshots(id, [protectedSave.id])).updated, [protectedSave.id]);
   await store.verify(otherId, foreign.id);
 });
@@ -281,6 +287,8 @@ test('selected exports preserve original flags and import as one collection with
   const destination = path.join(base, 'exports'); await fs.mkdir(destination);
   const result = await store.exportSnapshots(id, [protectedSave.id, trashed.id], destination);
   assert.equal(result.count, 2);
+  assert.equal(path.dirname(result.folder), destination);
+  assert.deepEqual(await fs.readdir(destination), [path.basename(result.folder)]);
   const exportedTrash = JSON.parse(await read(result.indexFile)).snapshots.find(item => item.manifest.id === trashed.id).manifest;
   assert(exportedTrash.deletedAt);
   const other = await new SaveStore(path.join(base, 'imported-library')).init();
@@ -393,6 +401,31 @@ test('bulk protection selects explicit records or all active game records withou
   await assert.rejects(store.updateSnapshots(id, [a.id], { protected: true, deleted: true }), /不支持/);
 });
 
+test('trash protection requires recovery first and rejects mixed batches without partial changes', async t => {
+  const { store, id } = await fixture(t);
+  const active = await save(store, id, '正常存档'), trash = await save(store, id, '回收存档');
+  await store.updateSnapshot(id, trash.id, { favorite: true, deleted: true });
+  const originals = await Promise.all([active.id, trash.id].map(item => store.readSnapshot(id, item)));
+  for (const protectedTag of [true, false]) {
+    await assert.rejects(store.updateSnapshot(id, trash.id, { protected: protectedTag }), /先.*找回/);
+    await assert.rejects(store.updateSnapshot(id, trash.id, { deleted: false, protected: protectedTag, label: '不能修改' }), /先.*找回/);
+    await assert.rejects(store.updateSnapshots(id, [trash.id], { protected: protectedTag }), /先.*找回/);
+    await assert.rejects(store.updateSnapshots(id, [active.id, trash.id], { protected: protectedTag }), /先.*找回/);
+    assert.deepEqual(await store.verify(id, active.id), originals[0]);
+    assert.deepEqual(await store.verify(id, trash.id), originals[1]);
+  }
+  await store.updateSnapshot(id, trash.id, { deleted: false });
+  await store.updateSnapshot(id, trash.id, { protected: true });
+  assert((await store.readSnapshot(id, trash.id)).protected);
+  await store.updateSnapshot(id, trash.id, { protected: false });
+  await store.updateSnapshot(id, trash.id, { deleted: true });
+  await store.updateSnapshots(id, [trash.id], { deleted: false });
+  assert.deepEqual((await store.updateSnapshots(id, [active.id, trash.id], { protected: true })).updated, [active.id, trash.id]);
+  const recovered = await store.verify(id, trash.id);
+  assert(recovered.protected && recovered.favorite && !recovered.deletedAt);
+  assert.deepEqual(recovered.records, originals[1].records);
+});
+
 test('bulk protection rejects automatic restore points before changing any record', async t => {
   const { store, id } = await fixture(t);
   const snapshot = await save(store, id);
@@ -415,7 +448,7 @@ test('bulk protection reports individual disk failures without changing failed r
   assert.equal((await store.readSnapshot(id, b.id)).protected, false);
 });
 
-test('exports A B C directly as named folders with raw game content and reimportable metadata', async t => {
+test('exports A B C inside one bundle with named raw content and reimportable metadata', async t => {
   const { base, source, store, id, input } = await fixture(t);
   const snapshots = [];
   for (const label of ['A', 'B', 'C']) {
@@ -424,17 +457,18 @@ test('exports A B C directly as named folders with raw game content and reimport
   }
   const destination = path.join(base, 'exports'); await fs.mkdir(destination);
   const result = await store.exportSnapshots(id, snapshots.map(meta => meta.id), destination);
-  assert.equal(result.folder, destination);
+  assert.equal(result.folder, path.join(destination, '测试游戏-存档导出'));
+  assert.deepEqual(await fs.readdir(destination), ['测试游戏-存档导出']);
   assert.deepEqual(result.directories, ['A', 'B', 'C']);
-  assert.deepEqual((await fs.readdir(destination)).sort(), ['.savehub-exports', 'A', 'B', 'C']);
+  assert.deepEqual((await fs.readdir(result.folder)).sort(), ['.savehub-exports', 'A', 'B', 'C']);
   for (const label of result.directories) {
-    assert.deepEqual((await fs.readdir(path.join(destination, label))).sort(), ['preferences', 'saves']);
-    assert.equal(await read(path.join(destination, label, 'preferences')), label);
-    assert((await fs.stat(path.join(destination, label, 'saves', '空目录'))).isDirectory());
+    assert.deepEqual((await fs.readdir(path.join(result.folder, label))).sort(), ['preferences', 'saves']);
+    assert.equal(await read(path.join(result.folder, label, 'preferences')), label);
+    assert((await fs.stat(path.join(result.folder, label, 'saves', '空目录'))).isDirectory());
   }
   const other = await new SaveStore(path.join(base, 'other')).init();
   const otherId = await other.upsertGame(input);
-  const report = await other.importLegacy(otherId, destination);
+  const report = await other.importLegacy(otherId, result.folder);
   assert.deepEqual(report.imported, ['A', 'B', 'C']);
   assert.deepEqual(report.failed, []);
   for (const meta of await other.snapshots(otherId)) await other.verify(otherId, meta.id);
@@ -447,16 +481,21 @@ test('export names handle unsafe characters, duplicate names, reserved names and
   for (const label of labels) snapshots.push(await save(store, id, label));
   const destination = path.join(base, 'exports'); await fs.mkdir(path.join(destination, 'A'), { recursive: true });
   await fs.writeFile(path.join(destination, 'A', 'keep.txt'), 'unchanged');
+  await fs.mkdir(path.join(destination, '测试游戏-存档导出'));
+  await fs.writeFile(path.join(destination, '测试游戏-存档导出 (2)'), 'keep-existing-file');
   const result = await store.exportSnapshots(id, snapshots.map(meta => meta.id), destination);
-  assert.deepEqual(result.directories.slice(0, 3), ['A (2)', 'A (3)', 'a (4)']);
+  assert.equal(path.basename(result.folder), '测试游戏-存档导出 (3)');
+  assert.deepEqual(result.directories.slice(0, 3), ['A', 'A (2)', 'a (3)']);
   assert.equal(new Set(result.directories.map(name => name.toLowerCase())).size, labels.length);
   for (const name of result.directories) {
     assert(!name.includes('/') && !name.includes('\\'));
     assert(Buffer.byteLength(name) <= 200);
     cleanItems([name]);
-    assert.equal(await read(path.join(destination, name, 'preferences')), 'setting-A');
+    assert.equal(await read(path.join(result.folder, name, 'preferences')), 'setting-A');
   }
   assert.equal(await read(path.join(destination, 'A', 'keep.txt')), 'unchanged');
+  assert.deepEqual(await fs.readdir(path.join(destination, '测试游戏-存档导出')), []);
+  assert.equal(await read(path.join(destination, '测试游戏-存档导出 (2)')), 'keep-existing-file');
   const index = JSON.parse(await read(result.indexFile));
   assert.deepEqual(index.snapshots.map(item => item.manifest.label), labels);
 });
@@ -488,17 +527,92 @@ test('legacy single and collection exports still import with original labels and
   assert.deepEqual(repeat.skipped, ['旧版存档']);
 });
 
-test('re-export after moving a named folder preserves unambiguous index mappings', async t => {
+test('previous unwrapped named exports still import from their root and individual folder', async t => {
+  const { base, store, id, input } = await fixture(t);
+  const snapshot = await save(store, id, '旧版名称目录');
+  await store.updateSnapshot(id, snapshot.id, { favorite: true, protected: true });
+  const destination = path.join(base, 'exports'); await fs.mkdir(destination);
+  const bundle = await store.exportSnapshot(id, snapshot.id, destination);
+  // Reproduce the previous layout with the named folder and index at the chosen root.
+  for (const child of await fs.readdir(bundle)) await fs.rename(path.join(bundle, child), path.join(destination, child));
+  await fs.rmdir(bundle);
+  const other = await new SaveStore(path.join(base, 'other')).init();
+  const otherId = await other.upsertGame(input);
+  const report = await other.importLegacy(otherId, destination);
+  assert.deepEqual(report.imported, [snapshot.label]);
+  assert.deepEqual(report.failed, []);
+  const [copy] = await other.snapshots(otherId);
+  assert(copy.favorite && copy.protected);
+  await other.verify(otherId, copy.id);
+  assert.deepEqual((await other.importLegacy(otherId, path.join(destination, snapshot.label))).skipped, [snapshot.label]);
+});
+
+test('single restore point exports are wrapped and preserve missing entries on reimport', async t => {
+  const { base, source, store, id, input } = await fixture(t);
+  const snapshot = await save(store, id);
+  await fs.rm(path.join(source, 'preferences'));
+  const { safetyId } = await store.restoreSnapshot(id, snapshot.id);
+  const point = await store.readSnapshot(id, safetyId);
+  assert.deepEqual(point.absent, ['preferences']);
+  const destination = path.join(base, 'exports'); await fs.mkdir(destination);
+  const folder = await store.exportSnapshot(id, safetyId, destination);
+  assert.deepEqual(await fs.readdir(destination), [path.basename(folder)]);
+  const [indexFile] = await fs.readdir(path.join(folder, '.savehub-exports'));
+  const index = JSON.parse(await read(path.join(folder, '.savehub-exports', indexFile)));
+  const [item] = index.snapshots;
+  assert.equal(item.manifest.kind, 'safety');
+  assert.deepEqual((await fs.readdir(folder)).sort(), ['.savehub-exports', item.directory].sort());
+  assert.deepEqual(await fs.readdir(path.join(folder, item.directory)), ['saves']);
+  const other = await new SaveStore(path.join(base, 'other')).init();
+  const otherId = await other.upsertGame(input);
+  const report = await other.importLegacy(otherId, folder);
+  assert.deepEqual(report.failed, []);
+  assert.deepEqual(report.imported, [point.label]);
+  const [copy] = await other.snapshots(otherId);
+  assert.deepEqual((await other.verify(otherId, copy.id)).absent, point.absent);
+});
+
+test('bundle names do not reuse stale mappings from previous unwrapped exports', async t => {
+  const { base, store, id } = await fixture(t);
+  const snapshot = await save(store, id, '测试游戏-存档导出');
+  const destination = path.join(base, 'exports'); await fs.mkdir(destination);
+  await atomicJson(path.join(destination, '.savehub-exports', 'old.json'), {
+    version: 2, type: 'savehub-collection', snapshots: [{ directory: snapshot.label, manifest: await store.readSnapshot(id, snapshot.id) }],
+  });
+  const folder = await store.exportSnapshot(id, snapshot.id, destination);
+  assert.equal(path.basename(folder), '测试游戏-存档导出 (2)');
+  const report = await store.importLegacy(id, folder);
+  assert.deepEqual(report.imported, [snapshot.label]);
+  assert.deepEqual(report.failed, []);
+});
+
+test('export bundle names sanitize game names and preserve the original metadata', async t => {
+  const { base, store, id, input } = await fixture(t);
+  const gameName = 'CON: 游戏/冒险?';
+  await store.upsertGame({ ...input, id, name: gameName });
+  const snapshot = await save(store, id);
+  const destination = path.join(base, 'exports'); await fs.mkdir(destination);
+  const result = await store.exportSnapshots(id, [snapshot.id], destination);
+  assert.equal(path.dirname(result.folder), destination);
+  cleanItems([path.basename(result.folder)]);
+  assert.equal(JSON.parse(await read(result.indexFile)).gameName, gameName);
+});
+
+test('moving a whole export bundle keeps metadata portable and repeated exports independent', async t => {
   const { base, store, id } = await fixture(t);
   const snapshot = await save(store, id, 'A');
   const destination = path.join(base, 'exports'); await fs.mkdir(destination);
   const first = await store.exportSnapshot(id, snapshot.id, destination);
-  await fs.rename(first, path.join(base, 'moved-A'));
+  const moved = path.join(base, 'moved-bundle');
+  await fs.rename(first, moved);
   const second = await store.exportSnapshot(id, snapshot.id, destination);
-  assert.equal(path.basename(second), 'A (2)');
-  const report = await store.importLegacy(id, destination);
-  assert.deepEqual(report.imported, ['A']);
-  assert.equal(report.failed.length, 1);
+  assert.equal(path.basename(second), '测试游戏-存档导出');
+  for (const folder of [moved, second]) {
+    assert.deepEqual((await fs.readdir(folder)).sort(), ['.savehub-exports', 'A']);
+    const report = await store.importLegacy(id, folder);
+    assert.deepEqual(report.imported, ['A']);
+    assert.deepEqual(report.failed, []);
+  }
 });
 
 test('raw game files named manifest.json and collection.json survive named export and import', async t => {
@@ -509,25 +623,43 @@ test('raw game files named manifest.json and collection.json survive named expor
   const snapshot = await save(store, id, '原始游戏文件');
   const destination = path.join(base, 'exports'); await fs.mkdir(destination);
   const exported = await store.exportSnapshot(id, snapshot.id, destination);
-  for (const file of ['manifest.json', 'collection.json']) assert.equal(await read(path.join(exported, file)), `game-content-${file}`);
-  const report = await store.importLegacy(id, exported);
+  const namedFolder = path.join(exported, snapshot.label);
+  for (const file of ['manifest.json', 'collection.json']) assert.equal(await read(path.join(namedFolder, file)), `game-content-${file}`);
+  const report = await store.importLegacy(id, namedFolder);
   assert.deepEqual(report.failed, []);
   assert.deepEqual(report.imported, ['原始游戏文件']);
 });
 
-test('a directory appearing during export publication is never overwritten or removed', async t => {
+test('a directory appearing inside the bundle during publication is never overwritten or removed', async t => {
   const { base, store, id } = await fixture(t);
   const a = await save(store, id, 'A'), b = await save(store, id, 'B');
   const destination = path.join(base, 'exports'); await fs.mkdir(destination);
   store.fault = async (phase, item) => {
     if (phase === 'before-export-publish' && item.directory === 'B') {
-      await fs.mkdir(path.join(destination, 'B'));
-      await fs.writeFile(path.join(destination, 'B', 'external.txt'), 'keep-external');
+      await fs.mkdir(path.join(item.folder, 'B'));
+      await fs.writeFile(path.join(item.folder, 'B', 'external.txt'), 'keep-external');
     }
   };
   await assert.rejects(store.exportSnapshots(id, [a.id, b.id], destination), { code: 'EEXIST' });
-  assert.deepEqual(await fs.readdir(destination), ['B']);
-  assert.equal(await read(path.join(destination, 'B', 'external.txt')), 'keep-external');
+  assert.deepEqual(await fs.readdir(destination), ['测试游戏-存档导出']);
+  const folder = path.join(destination, '测试游戏-存档导出');
+  assert.deepEqual(await fs.readdir(folder), ['B']);
+  assert.equal(await read(path.join(folder, 'B', 'external.txt')), 'keep-external');
+});
+
+test('an outer folder appearing after export preflight is never overwritten or removed', async t => {
+  const { base, store, id } = await fixture(t);
+  const snapshot = await save(store, id);
+  const destination = path.join(base, 'exports'); await fs.mkdir(destination);
+  store.fault = async (phase, item) => {
+    if (phase === 'before-export-bundle-publish') {
+      await fs.mkdir(item.folder);
+      await fs.writeFile(path.join(item.folder, 'external.txt'), 'keep-external');
+    }
+  };
+  await assert.rejects(store.exportSnapshot(id, snapshot.id, destination), { code: 'EEXIST' });
+  assert.deepEqual(await fs.readdir(destination), ['测试游戏-存档导出']);
+  assert.equal(await read(path.join(destination, '测试游戏-存档导出', 'external.txt')), 'keep-external');
 });
 
 test('named export indexes reject traversal, duplicate directories and symlinks', async t => {
@@ -538,14 +670,14 @@ test('named export indexes reject traversal, duplicate directories and symlinks'
   const index = JSON.parse(await read(result.indexFile));
   for (const name of ['../outside', 'nested/folder', 'C:\\outside', '.savehub-exports']) {
     await atomicJson(result.indexFile, { ...index, snapshots: [{ ...index.snapshots[0], directory: name }] });
-    await assert.rejects(store.importLegacy(id, destination));
+    await assert.rejects(store.importLegacy(id, result.folder));
   }
   await atomicJson(result.indexFile, { ...index, snapshots: [index.snapshots[0], index.snapshots[0]] });
-  await assert.rejects(store.importLegacy(id, destination), /重复/);
+  await assert.rejects(store.importLegacy(id, result.folder), /重复/);
   await atomicJson(result.indexFile, index);
-  await fs.rename(path.join(destination, 'A'), path.join(base, 'outside'));
-  await fs.symlink(path.join(base, 'outside'), path.join(destination, 'A'), process.platform === 'win32' ? 'junction' : 'dir');
-  const report = await store.importLegacy(id, destination);
+  await fs.rename(path.join(result.folder, 'A'), path.join(base, 'outside'));
+  await fs.symlink(path.join(base, 'outside'), path.join(result.folder, 'A'), process.platform === 'win32' ? 'junction' : 'dir');
+  const report = await store.importLegacy(id, result.folder);
   assert.equal(report.imported.length, 0);
   assert.match(report.failed[0].error, /符号链接|目录联接/);
 });
@@ -731,8 +863,12 @@ test('snapshot export can be verified and imported into an independent library',
   assert.equal(report.imported.length, 1);
   await other.verifySnapshot(gameId, (await other.snapshots(gameId))[0].id);
   const repeated = await store.exportSnapshot(id, snapshot.id, destination);
-  assert.equal(path.basename(repeated), `${snapshot.label} (2)`);
-  assert.equal(await read(path.join(exported, 'preferences')), 'setting-A');
+  assert.equal(path.basename(repeated), '测试游戏-存档导出 (2)');
+  assert.deepEqual((await fs.readdir(destination)).sort(), ['测试游戏-存档导出', '测试游戏-存档导出 (2)']);
+  for (const folder of [exported, repeated]) {
+    assert.deepEqual((await fs.readdir(folder)).sort(), ['.savehub-exports', snapshot.label]);
+    assert.equal(await read(path.join(folder, snapshot.label, 'preferences')), 'setting-A');
+  }
 });
 
 test('game removal, snapshot trash, favorites and theme choices persist and are reversible', async t => {
