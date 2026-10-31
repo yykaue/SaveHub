@@ -34,6 +34,7 @@ jobs:
       - run: pnpm build
       - run: pnpm test:ui
       - run: pnpm test:interactions
+      - run: pnpm test:deletion
       - run: pnpm dist:${{ matrix.target }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -48,5 +49,6 @@ jobs:
             release/**/*.zip
             docs/screenshots/verification.json
             docs/screenshots/interaction-verification.json
+            docs/screenshots/deletion-verification.json
             docs/screenshots/portable-verification.json
           if-no-files-found: error

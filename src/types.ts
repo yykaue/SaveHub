@@ -4,7 +4,7 @@ export interface Location { root: string; items: string[] }
 export interface Snapshot {
   id: string; gameId: string; label: string; note: string; kind: 'manual' | 'safety' | 'imported';
   createdAt: string; platform: Platform; entries: string[]; absent: string[]; fileCount: number; bytes: number;
-  favorite?: boolean; protected?: boolean; deletedAt?: string; corrupted?: boolean; error?: string;
+  favorite?: boolean; protected?: boolean; deletedAt?: string; corrupted?: boolean; error?: string; purgePending?: boolean;
 }
 export interface GameInput {
   id?: string; name: string; subtitle: string; icon: string; color: string;
@@ -29,7 +29,8 @@ export interface Bridge {
   saveSnapshot(id: string, details: { label: string; note: string }): Promise<Snapshot>;
   restoreSnapshot(gameId: string, id: string): Promise<{ safetyId: string; label: string }>;
   updateSnapshot(gameId: string, id: string, details: { label?: string; note?: string; favorite?: boolean; protected?: boolean; deleted?: boolean }): Promise<void>;
-  updateSnapshots(gameId: string, ids: string[], details: { deleted: boolean }): Promise<BatchReport>;
+  updateSnapshots(gameId: string, ids: string[] | 'all', details: { deleted: boolean } | { protected: boolean }): Promise<BatchReport>;
+  deleteSnapshots(gameId: string, ids: string[]): Promise<BatchReport>;
   verifySnapshot(gameId: string, id: string): Promise<{ fileCount: number; bytes: number }>;
   importSnapshots(id: string, useLegacy?: boolean): Promise<ImportReport | null>;
   exportSnapshot(gameId: string, id: string): Promise<string | null>;

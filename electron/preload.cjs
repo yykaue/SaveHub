@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('savehub', {
   restoreSnapshot: (gameId, id) => invoke('restoreSnapshot', gameId, id),
   updateSnapshot: (gameId, id, details) => invoke('updateSnapshot', gameId, id, details),
   updateSnapshots: (gameId, ids, details) => invoke('updateSnapshots', gameId, ids, details),
+  deleteSnapshots: (gameId, ids) => invoke('deleteSnapshots', gameId, ids),
   verifySnapshot: (gameId, id) => invoke('verifySnapshot', gameId, id),
   importSnapshots: (id, useLegacy) => invoke('importSnapshots', id, useLegacy),
   exportSnapshot: (gameId, id) => invoke('exportSnapshot', gameId, id),

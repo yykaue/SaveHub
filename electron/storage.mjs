@@ -2,10 +2,12 @@ import path from 'node:path';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 
 export const THEMES = ['ink', 'tech', 'cyber', 'glass'];
 const ID = /^[a-z0-9-]{1,64}$/;
 const MAX_FILES = 100000;
+const EXPORT_INDEX = '.savehub-exports';
 const missing = error => error?.code === 'ENOENT';
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -38,6 +40,28 @@ export function within(root, target) {
 }
 
 async function statMaybe(file) { try { return await fs.lstat(file); } catch (error) { if (missing(error)) return null; throw error; } }
+
+async function assertTreeNoLinks(directory) {
+  await assertNoLinks(directory);
+  if (!(await statMaybe(directory))) return;
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) throw new Error('永久删除前发现符号链接或目录联接，操作已停止。');
+    if (entry.isDirectory()) await assertTreeNoLinks(file);
+  }
+}
+
+export async function commitSnapshotDirectory(source, destination, { platform = process.platform, rename = fs.rename, pause = delay } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try { await rename(source, destination); return; }
+    catch (error) {
+      // Windows can briefly hold a newly written backup directory open. Retry only
+      // this final commit, with a bounded delay; do not retry over an existing target.
+      if (platform !== 'win32' || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) || attempt >= 4 || await statMaybe(destination)) throw error;
+      await pause(50 * (attempt + 1));
+    }
+  }
+}
 
 export async function assertNoLinks(file) {
   const resolved = path.resolve(file);
@@ -142,6 +166,17 @@ function validateManifest(meta) {
 
 const publicSnapshot = ({ records, ...snapshot }) => snapshot;
 
+function exportName(label) {
+  let name = label.normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().replace(/[. ]+$/g, '');
+  // Leave room for collision suffixes on filesystems with a 255-byte name limit.
+  while (Buffer.byteLength(name, 'utf8') > 180) name = Array.from(name).slice(0, -1).join('');
+  name = name.replace(/[. ]+$/g, '') || '未命名存档';
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name) || name.toLowerCase().startsWith('.savehub-export')) name = `_${name}`;
+  return name;
+}
+
+const foldedName = name => name.normalize('NFC').toLowerCase();
+
 export class SaveStore {
   constructor(dataDir, { platform = process.platform, onProgress = () => {}, fault = async () => {} } = {}) {
     this.dataDir = path.resolve(dataDir);
@@ -195,13 +230,17 @@ export class SaveStore {
     const result = [];
     let entries;
     try { entries = await fs.readdir(directory, { withFileTypes: true }); } catch (error) { if (missing(error)) return []; throw error; }
+    const ids = new Set(entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name));
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const match = entry.name.match(/^\.purge-([a-z0-9-]{1,64})\.json$/);
+      if (match && entry.isFile()) ids.add(match[1]);
+    }
+    for (const id of ids) {
       try {
-        const meta = await this.readSnapshot(gameId, entry.name);
+        const meta = await this.readSnapshot(gameId, id);
         if (includeDeleted || !meta.deletedAt) result.push(publicSnapshot(meta));
       } catch (error) {
-        result.push({ id: entry.name, gameId, label: `损坏的存档 · ${entry.name.slice(0, 8)}`, kind: 'manual', corrupted: true, error: error.message, createdAt: '', bytes: 0, fileCount: 0, entries: [] });
+        result.push({ id, gameId, label: `损坏的存档 · ${id.slice(0, 8)}`, kind: 'manual', corrupted: true, error: error.message, createdAt: '', bytes: 0, fileCount: 0, entries: [] });
       }
     }
     return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -316,7 +355,7 @@ export class SaveStore {
       };
       validateManifest(meta);
       await atomicJson(path.join(stage, 'manifest.json'), meta);
-      await fs.rename(stage, destination);
+      await commitSnapshotDirectory(stage, destination);
       return meta;
     } finally { await fs.rm(stage, { recursive: true, force: true }).catch(() => {}); }
   }
@@ -324,8 +363,14 @@ export class SaveStore {
   async readSnapshot(gameId, id) {
     const folder = this.snapshotDir(gameId, id);
     await assertNoLinks(folder);
-    const meta = validateManifest(JSON.parse(await fs.readFile(path.join(folder, 'manifest.json'), 'utf8')));
+    const marker = path.join(path.dirname(folder), `.purge-${id}.json`);
+    await assertNoLinks(marker);
+    const pending = Boolean(await statMaybe(marker));
+    const file = pending ? marker : path.join(folder, 'manifest.json');
+    await assertNoLinks(file);
+    const meta = validateManifest(JSON.parse(await fs.readFile(file, 'utf8')));
     if (meta.id !== id || meta.gameId !== gameId) throw new Error('存档身份不一致，操作已停止。');
+    if (pending && (!meta.deletedAt || !meta.purgePending)) throw new Error('永久删除记录无效，操作已停止。');
     return meta;
   }
 
@@ -338,6 +383,7 @@ export class SaveStore {
 
   async verify(gameId, id) {
     const meta = await this.readSnapshot(gameId, id);
+    if (meta.purgePending) throw new Error('这份记录已开始永久删除，只能继续清理，不能读取或导出。');
     const actual = await inventory(path.join(this.snapshotDir(gameId, id), 'payload'), meta.entries, { allowMissing: true, progress: this.onProgress });
     if (signature(actual) !== signature(meta)) throw new Error('存档完整性校验失败：文件缺失或内容已改变。游戏文件未被覆盖。');
     return meta;
@@ -347,6 +393,8 @@ export class SaveStore {
     return this.exclusive(async () => {
       this.game(gameId);
       const meta = await this.readSnapshot(gameId, id);
+      if (meta.purgePending) throw new Error('这份记录已开始永久删除，不能找回或修改，请继续永久删除。');
+      if (changes.deleted && (meta.protected || changes.protected)) throw new Error('保护存档不可删除，请先取消保护标记。');
       if ('label' in changes) {
         if (typeof changes.label !== 'string' || !changes.label.trim() || changes.label.length > 100) throw new Error('存档名称需要 1–100 个字符。');
         meta.label = changes.label.trim();
@@ -372,22 +420,71 @@ export class SaveStore {
     return unique;
   }
 
-  async updateSnapshots(gameId, ids, changes) {
+  async updateSnapshots(gameId, selection, changes) {
     return this.exclusive(async () => {
       this.game(gameId);
-      if (!changes || typeof changes.deleted !== 'boolean' || Object.keys(changes).some(key => key !== 'deleted')) throw new Error('不支持的批量标记操作。');
+      const keys = Object.keys(changes || {});
+      if (keys.length !== 1 || !['deleted', 'protected'].includes(keys[0]) || typeof changes[keys[0]] !== 'boolean') throw new Error('不支持的批量标记操作。');
+      if (selection === 'all' && keys[0] !== 'protected') throw new Error('全部记录仅支持批量保护或取消保护。');
+      const ids = selection === 'all' ? (await this.snapshots(gameId)).filter(meta => meta.kind !== 'safety').map(meta => meta.id) : selection;
+      if (selection === 'all' && ids.length === 0) return { updated: [], failed: [] };
       const selected = this.validateSelection(ids);
       // Validate ownership and every manifest before changing the first item.
       const metas = [];
       for (const id of selected) metas.push(await this.readSnapshot(gameId, id));
+      if (metas.some(meta => meta.purgePending)) throw new Error('所选记录包含尚未完成永久删除的项目，不能找回或修改。');
+      if (changes.deleted && metas.some(meta => meta.protected)) throw new Error('所选记录中有保护存档，请先取消保护标记后再删除。');
+      if ('protected' in changes && metas.some(meta => meta.kind === 'safety')) throw new Error('自动恢复点不能作为普通存档标记。');
       const report = { updated: [], failed: [] };
       const timestamp = new Date().toISOString();
       for (const meta of metas) {
         try {
-          await this.fault('before-batch-mark', { gameId, id: meta.id, deleted: changes.deleted });
-          if (changes.deleted) meta.deletedAt = timestamp; else delete meta.deletedAt;
+          await this.fault('before-batch-mark', { gameId, id: meta.id, ...changes });
+          if ('protected' in changes) meta.protected = changes.protected;
+          else if (changes.deleted) meta.deletedAt = timestamp; else delete meta.deletedAt;
           await atomicJson(path.join(this.snapshotDir(gameId, meta.id), 'manifest.json'), meta);
           report.updated.push(meta.id);
+        } catch (error) { report.failed.push({ id: meta.id, label: meta.label, error: error.message }); }
+      }
+      return report;
+    });
+  }
+
+  async deleteSnapshots(gameId, ids) {
+    return this.exclusive(async () => {
+      this.game(gameId);
+      const selected = this.validateSelection(ids);
+      const root = path.resolve(this.gameDir(gameId), 'snapshots');
+      const items = [];
+      // Preflight the whole selection before marking or deleting any files.
+      for (const id of selected) {
+        const meta = await this.readSnapshot(gameId, id);
+        if (!meta.deletedAt) throw new Error('只能永久删除回收站或已移除的恢复点中的记录。');
+        if (meta.protected) throw new Error('保护存档不可删除，请先取消保护标记。');
+        const folder = this.snapshotDir(gameId, id), stage = path.join(root, `.purging-${id}`), marker = path.join(root, `.purge-${id}.json`);
+        for (const target of [folder, stage, marker]) {
+          if (path.dirname(path.resolve(target)) !== root || !within(this.vault, target)) throw new Error('永久删除路径越界。');
+          await assertNoLinks(target);
+        }
+        const original = await statMaybe(folder), staged = await statMaybe(stage);
+        if (original && staged || staged && !meta.purgePending) throw new Error('永久删除暂存目录冲突，操作已停止。');
+        await assertTreeNoLinks(folder); await assertTreeNoLinks(stage);
+        items.push({ meta, folder, stage, marker });
+      }
+      const report = { updated: [], failed: [] };
+      for (const { meta, folder, stage, marker } of items) {
+        try {
+          await this.fault('before-purge', { gameId, id: meta.id });
+          // Keep the intent outside the directory being physically removed, so an
+          // interrupted/partial deletion remains visible and can only be retried.
+          await atomicJson(marker, { ...meta, purgePending: true });
+          if (await statMaybe(folder)) await commitSnapshotDirectory(folder, stage);
+          await assertTreeNoLinks(stage);
+          await this.fault('before-purge-remove', { gameId, id: meta.id, stage });
+          await fs.rm(stage, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 });
+          await fs.rm(marker, { force: true });
+          report.updated.push(meta.id);
+          this.onProgress({ phase: 'deleting', completed: report.updated.length + report.failed.length, total: items.length, detail: meta.label });
         } catch (error) { report.failed.push({ id: meta.id, label: meta.label, error: error.message }); }
       }
       return report;
@@ -509,7 +606,10 @@ export class SaveStore {
       const report = { imported: [], skipped: [], failed: [] };
       const existing = await this.snapshots(gameId, true);
       let candidates;
-      if (await statMaybe(collectionFile)) {
+      const namedExports = await this.namedExportCandidates(directory);
+      if (namedExports) {
+        candidates = namedExports;
+      } else if (await statMaybe(collectionFile)) {
         await assertNoLinks(collectionFile);
         const collection = JSON.parse(await fs.readFile(collectionFile, 'utf8'));
         if (collection.version !== 1 || collection.type !== 'savehub-collection') throw new Error('批量导出清单格式无效。');
@@ -527,12 +627,12 @@ export class SaveStore {
         try {
           if (candidate.exported) {
             const manifest = path.join(candidate.exported, 'manifest.json');
-            await assertNoLinks(manifest);
-            const meta = validateManifest(JSON.parse(await fs.readFile(manifest, 'utf8')));
+            if (!candidate.meta) await assertNoLinks(manifest);
+            const meta = candidate.meta || validateManifest(JSON.parse(await fs.readFile(manifest, 'utf8')));
             if (candidate.id && candidate.id !== meta.id) throw new Error('导出存档的身份与批量清单不一致。');
             candidate.name = meta.label;
             if (!equal([...meta.entries].sort(), [...entries].sort())) throw new Error('导出存档的相对路径与当前游戏配置不一致。');
-            candidate.source = path.join(candidate.exported, 'payload');
+            candidate.source = candidate.meta ? candidate.exported : path.join(candidate.exported, 'payload');
             const actual = await inventory(candidate.source, entries, { allowMissing: true });
             if (signature(actual) !== signature(meta)) throw new Error('导出存档的完整性校验失败。');
             candidate.allowMissing = meta.absent.length > 0;
@@ -552,34 +652,48 @@ export class SaveStore {
   }
 
   async exportSnapshot(gameId, id, destination) {
-    return this.exclusive(async () => {
-      this.game(gameId);
-      const meta = await this.verify(gameId, id);
-      if (typeof destination !== 'string' || !path.isAbsolute(destination)) throw new Error('请选择导出目录。');
-      await assertNoLinks(destination);
-      if (within(this.dataDir, destination)) throw new Error('请选择 SaveHub 资料库以外的导出目录。');
-      const folder = path.join(destination, `SaveHub-${id}`);
-      if (await statMaybe(folder)) throw new Error('导出目录已存在，请选择其他位置。');
-      await fs.mkdir(folder);
-      try {
-        await this.writeExport(gameId, meta, folder);
-        return folder;
-      } catch (error) { await fs.rm(folder, { recursive: true, force: true }); throw error; }
-    });
+    const result = await this.exportSnapshots(gameId, [id], destination);
+    return path.join(result.folder, result.directories[0]);
+  }
+
+  async exportIndexCandidates(root, onlyFolder) {
+    const indexDir = path.join(root, EXPORT_INDEX);
+    await assertNoLinks(indexDir);
+    if (!(await statMaybe(indexDir))?.isDirectory()) return null;
+    const candidates = [];
+    const seen = new Set();
+    for (const file of (await fs.readdir(indexDir)).filter(file => file.endsWith('.json')).sort()) {
+      await assertNoLinks(path.join(indexDir, file));
+      const index = JSON.parse(await fs.readFile(path.join(indexDir, file), 'utf8'));
+      if (index.version !== 2 || index.type !== 'savehub-collection' || !Array.isArray(index.snapshots) || !index.snapshots.length || index.snapshots.length > 10000) throw new Error('命名导出清单格式无效。');
+      for (const item of index.snapshots) {
+        const [name] = cleanItems([item.directory]);
+        if (name.includes('/') || foldedName(name) === EXPORT_INDEX || seen.has(foldedName(name))) throw new Error('导出清单包含无效或重复的存档目录。');
+        seen.add(foldedName(name));
+        if (onlyFolder && name !== onlyFolder) continue;
+        const meta = validateManifest(item.manifest);
+        candidates.push({ name: meta.label, id: meta.id, meta, exported: path.join(root, name) });
+      }
+    }
+    return candidates.length ? candidates : null;
+  }
+
+  async namedExportCandidates(directory) {
+    // A single named folder can contain arbitrary game files named manifest.json or collection.json.
+    return await this.exportIndexCandidates(path.dirname(directory), path.basename(directory)) || await this.exportIndexCandidates(directory);
   }
 
   async writeExport(gameId, meta, folder) {
-    await copyRecords(path.join(this.snapshotDir(gameId, meta.id), 'payload'), path.join(folder, 'payload'), meta.records, this.onProgress);
-    const copy = await inventory(path.join(folder, 'payload'), meta.entries, { allowMissing: true });
+    await copyRecords(path.join(this.snapshotDir(gameId, meta.id), 'payload'), folder, meta.records, this.onProgress);
+    const copy = await inventory(folder, meta.entries, { allowMissing: true });
     if (signature(copy) !== signature(meta)) throw new Error('导出文件校验失败。');
-    await atomicJson(path.join(folder, 'manifest.json'), meta);
   }
 
   async exportSnapshots(gameId, selection, destination) {
     return this.exclusive(async () => {
       const game = this.game(gameId);
       const ids = selection === 'all'
-        ? (await this.snapshots(gameId)).filter(meta => ['manual', 'imported'].includes(meta.kind) && !meta.protected).map(meta => meta.id)
+        ? (await this.snapshots(gameId)).filter(meta => ['manual', 'imported'].includes(meta.kind)).map(meta => meta.id)
         : selection;
       const selected = this.validateSelection(ids);
       if (typeof destination !== 'string' || !path.isAbsolute(destination)) throw new Error('请选择导出目录。');
@@ -588,18 +702,49 @@ export class SaveStore {
       const metas = [];
       for (const id of selected) metas.push(await this.verify(gameId, id));
       const batchId = randomUUID();
-      const folder = path.join(destination, `SaveHub-${gameId}-${batchId.slice(0, 8)}`);
       const stage = path.join(destination, `.savehub-export-${batchId}`);
-      if (await statMaybe(folder)) throw new Error('导出目录已存在，请重试。');
+      const indexDir = path.join(destination, EXPORT_INDEX);
+      await assertNoLinks(indexDir);
+      const indexStat = await statMaybe(indexDir);
+      if (indexStat && !indexStat.isDirectory()) throw new Error('导出位置中已有同名的清单文件，请选择其他位置。');
+      const taken = new Set((await fs.readdir(destination)).map(foldedName));
+      // Keep old index mappings unambiguous even if a previously exported folder was moved.
+      for (const candidate of await this.exportIndexCandidates(destination) || []) taken.add(foldedName(path.basename(candidate.exported)));
+      taken.add(EXPORT_INDEX);
+      const directories = metas.map(meta => {
+        const base = exportName(meta.label);
+        let name = base, suffix = 2;
+        while (taken.has(foldedName(name))) name = `${base} (${suffix++})`;
+        taken.add(foldedName(name));
+        return name;
+      });
+      const published = [];
+      const indexFile = path.join(indexDir, `${batchId}.json`);
       await fs.mkdir(stage);
       try {
         for (const [index, meta] of metas.entries()) {
           this.onProgress({ phase: 'exporting', completed: index, total: metas.length, detail: meta.label });
-          await this.writeExport(gameId, meta, path.join(stage, `SaveHub-${meta.id}`));
+          await this.writeExport(gameId, meta, path.join(stage, directories[index]));
         }
-        await atomicJson(path.join(stage, 'collection.json'), { version: 1, type: 'savehub-collection', gameId, gameName: game.name, exportedAt: new Date().toISOString(), snapshots: metas.map(meta => meta.id) });
-        await fs.rename(stage, folder);
-        return { folder, count: metas.length };
+        // All payloads are verified before publishing. mkdir claims each destination
+        // without replacing a folder created by another process after our preflight.
+        await fs.mkdir(indexDir, { recursive: true });
+        for (const name of directories) {
+          const target = path.join(destination, name), source = path.join(stage, name);
+          await this.fault('before-export-publish', { directory: name });
+          await fs.mkdir(target);
+          published.push(target);
+          for (const child of await fs.readdir(source)) await fs.rename(path.join(source, child), path.join(target, child));
+        }
+        await atomicJson(indexFile, { version: 2, type: 'savehub-collection', gameId, gameName: game.name, exportedAt: new Date().toISOString(), snapshots: metas.map((manifest, index) => ({ directory: directories[index], manifest })) });
+        return { folder: destination, count: metas.length, directories, indexFile };
+      } catch (error) {
+        for (const folder of published) {
+          if (!within(destination, folder) || folder === destination) throw new Error('导出清理目录越界。');
+          await fs.rm(folder, { recursive: true, force: true });
+        }
+        if (!indexStat) await fs.rmdir(indexDir).catch(() => {});
+        throw error;
       } finally {
         // This uniquely named, owned staging folder is always inside the chosen destination.
         if (!within(destination, stage)) throw new Error('导出暂存目录越界。');

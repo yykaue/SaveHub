@@ -20,13 +20,13 @@
 .count-pill { display: inline-grid; place-items: center; min-width: 17px; height: 17px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--accent); font-size: 9px; }
 .filter-tabs button > span { display: inline-grid; place-items: center; font-size: 9px; min-width: 15px; height: 15px; background: var(--accent-soft); color: var(--faint); border-radius: 3px; margin-left: 2px; }
 .filter-tabs button.active > span { color: var(--accent); }
-.batch-toolbar { display: flex; align-items: center; gap: 11px; min-height: 46px; padding: 8px 0; margin-top: -5px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.batch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; min-height: 46px; padding: 8px 0; margin-top: -5px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
 .batch-toolbar.has-selection { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .selection-summary { font-size: 10px; color: var(--faint); white-space: nowrap; }
 .selection-summary strong { color: var(--accent); font-weight: 600; }
 .has-selection .selection-summary { color: var(--text); }
 .clear-selection { font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
-.batch-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.batch-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
 .batch-actions .button { font-size: 10px; }
 .batch-actions .export-all { margin-left: 3px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 25%, var(--line)); }
 .snapshot-table .table-header, .snapshot-table .snapshot-row { grid-template-columns: 22px minmax(170px, 1fr) 144px 95px 148px; gap: 12px; }
@@ -53,6 +53,13 @@
 @keyframes menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 .batch-confirm-list { margin: 18px 0 0; padding: 12px 12px 12px 31px; max-height: 230px; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
 .batch-confirm-list li { font-size: 12px; line-height: 2.1; overflow-wrap: anywhere; color: var(--muted); }
+.notice.favorite-delete-warning { color: var(--text); background: color-mix(in srgb, var(--warning) 14%, var(--surface)); border: 2px solid var(--warning); }
+.favorite-delete-warning > svg { flex-shrink: 0; color: var(--warning); fill: color-mix(in srgb, var(--warning) 25%, transparent); }
+.favorite-delete-warning strong { display: block; font-size: 13px; font-weight: 700; }
+.favorite-delete-warning p { margin: 5px 0 0; }
+.batch-confirm-list li.favorite-delete-item { color: var(--text); font-weight: 600; }
+.favorite-delete-tag { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 6px; border: 1px solid var(--warning); border-radius: 4px; background: color-mix(in srgb, var(--warning) 14%, transparent); font-size: 10px; white-space: nowrap; }
+.favorite-delete-tag svg { color: var(--warning); fill: color-mix(in srgb, var(--warning) 25%, transparent); }
 .restore-points-list { max-height: 400px; overflow: auto; }
 .restore-point { display: flex; gap: 10px; align-items: center; padding: 15px 0; border-top: 1px solid var(--line); }
 .restore-point > svg { color: var(--accent); }
@@ -62,6 +69,14 @@
 .restore-point .icon-button { width: 23px; height: 27px; }
 .removed-points { margin: 20px 0 0; color: var(--faint); font-size: 11px; }
 .removed-points > summary { cursor: pointer; }
+.restore-point-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 10px 0; }
+.restore-point-toolbar label { display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; }
+.restore-point-toolbar > span { color: var(--muted); font-size: 12px; margin-right: auto; }
+.restore-point-toolbar .button { margin-left: 0; }
+.restore-points-group .restore-points-list { max-height: 320px; }
+.restore-points-group .restore-point { flex-wrap: wrap; }
+.restore-points-group .restore-point > div { flex-basis: 170px; }
+.notice.permanent-delete-warning { color: var(--red); background: color-mix(in srgb, var(--red) 10%, var(--surface)); border: 2px solid var(--red); }
 .plus-icon { font-size: 17px; line-height: 1; }
 @media (max-width: 1200px) {
   .snapshot-table .table-header, .snapshot-table .snapshot-row { grid-template-columns: 20px minmax(150px, 1fr) 110px 78px 129px; gap: 8px; }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Archive, ArrowRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Download, ExternalLink, Folder, FolderOpen, Gamepad2, HardDrive, History, Info, LayoutGrid, Library, LoaderCircle, Monitor, Paintbrush, Plus, RotateCcw, Settings2, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { Archive, ArrowRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, ExternalLink, Folder, FolderOpen, Gamepad2, HardDrive, History, Info, LayoutGrid, Library, LoaderCircle, Monitor, Paintbrush, Plus, RotateCcw, Settings2, ShieldCheck, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
 import { GameGlyph, Landscape, Logo } from './art';
-import { SnapshotList, defaultView, type LibraryView, type SnapshotAction } from './SnapshotList';
+import { SnapshotList, defaultView, matchesFilter, type LibraryView, type SnapshotAction } from './SnapshotList';
 import { dateLabel, fullDate, formatBytes, kinds } from './format';
+import { RestorePoints, type PointSelection } from './RestorePoints';
 import { animate } from './motion';
 import type { AppState, BatchReport, Bridge, Game, GameInput, ImportReport, Platform, Progress, Snapshot, Theme } from './types';
 
@@ -15,9 +16,9 @@ const themes: { id: Theme; name: string; english: string; caption: string; descr
 const icons = ['ring', 'spire', 'flame', 'gamepad', 'swords', 'gem', 'ghost', 'rocket'];
 const iconNames: Record<string, string> = { ring: '圆环', spire: '高塔', flame: '火焰', gamepad: '手柄', swords: '双剑', gem: '宝石', ghost: '幽灵', rocket: '火箭' };
 const colors = ['#8a9270', '#729486', '#a28167', '#738fb1', '#ab80ae', '#be7976'];
-const visibleSaves = (game: Game) => game.snapshots.filter(snapshot => !snapshot.deletedAt);
+const visibleSaves = (game: Game) => game.snapshots.filter(snapshot => matchesFilter(snapshot, 'all'));
 type Page = 'library' | 'games' | 'themes' | 'settings';
-type ModalState = { type: 'restore-points' } | { type: 'batch-delete'; gameId: string; snapshots: Snapshot[] } | { type: 'batch-report'; report: BatchReport } | { type: 'game'; game?: Game } | { type: 'save'; snapshot?: Snapshot } | { type: 'restore' | 'delete'; snapshot: Snapshot } | { type: 'remove-game'; game: Game } | { type: 'detail'; snapshot: Snapshot } | { type: 'import-report'; report: ImportReport } | { type: 'help' };
+type ModalState = { type: 'restore-points' } | { type: 'delete'; gameId: string; snapshots: Snapshot[]; permanent: boolean; returnTo?: 'restore-points' } | { type: 'batch-report'; report: BatchReport; permanent?: boolean; returnTo?: 'restore-points' } | { type: 'game'; game?: Game } | { type: 'save'; snapshot?: Snapshot } | { type: 'restore'; snapshot: Snapshot } | { type: 'remove-game'; game: Game } | { type: 'detail'; snapshot: Snapshot } | { type: 'import-report'; report: ImportReport } | { type: 'help' };
 
 export default function App() {
   const api = window.savehub;
@@ -30,6 +31,7 @@ export default function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const [views, setViews] = useState<Record<string, LibraryView>>({});
+  const [pointSelections, setPointSelections] = useState<Record<string, PointSelection>>({});
   const [menu, setMenu] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const nextScroll = useRef<number | null>(null);
@@ -107,10 +109,12 @@ export default function App() {
     if (report) setModal({ type: 'import-report', report });
   };
   const snapshotAction = (action: SnapshotAction, snapshot: Snapshot) => {
-    if (action === 'detail' || action === 'restore' || action === 'delete') { setModal({ type: action, snapshot }); return; }
+    if (action === 'delete' && snapshot.protected) { setToast({ text: '保护存档不可删除，请先取消保护标记。', error: true }); return; }
+    if (action === 'delete') { requestDelete([snapshot], snapshot.kind === 'safety' ? 'restore-points' : undefined); return; }
+    if (action === 'detail' || action === 'restore') { setModal({ type: action, snapshot }); return; }
     if (action === 'edit') { setModal({ type: 'save', snapshot }); return; }
     if (action === 'favorite') { void perform('更新收藏标记', () => api.updateSnapshot(current.id, snapshot.id, { favorite: !snapshot.favorite })); return; }
-    if (action === 'protect') { void perform('更新保护标记', () => api.updateSnapshot(current.id, snapshot.id, { protected: !snapshot.protected }), snapshot.protected ? '已取消保护标记。' : '已标记为保护存档，原存档内容和数量不变。'); return; }
+    if (action === 'protect') { void perform('更新保护标记', () => api.updateSnapshot(current.id, snapshot.id, { protected: !snapshot.protected }), snapshot.protected ? '已取消保护标记。' : '已标记为保护存档，取消保护前不可删除，记录仍保留在全部存档中。'); return; }
     if (action === 'recover') { void perform('找回存档', () => api.updateSnapshot(current.id, snapshot.id, { deleted: false }), '已找回存档，保留原有收藏和保护标记。'); return; }
     if (action === 'verify') { void perform('正在校验存档', async () => { const result = await api.verifySnapshot(current.id, snapshot.id); setToast({ text: '完整性校验通过，' + result.fileCount + ' 个文件均完好。' }); }); return; }
     if (action === 'export') void perform('正在导出存档', async () => { const result = await api.exportSnapshot(current.id, snapshot.id); if (result) setToast({ text: '已导出到 ' + result }); });
@@ -119,12 +123,45 @@ export default function App() {
     const result = await api.exportSnapshots(current.id, selection);
     if (result) setToast({ text: '已导出 ' + result.count + ' 份存档到 ' + result.folder });
   });
-  const batchMark = async (gameId: string, ids: string[], deleted: boolean) => {
-    const report = await perform(deleted ? '正在移入回收站' : '正在找回所选存档', () => api.updateSnapshots(gameId, ids, { deleted }), undefined, true);
+  function requestDelete(snapshots: Snapshot[], returnTo?: 'restore-points') {
+    if (!snapshots.length) return;
+    if (snapshots.some(snapshot => snapshot.protected)) { setToast({ text: '保护存档不可删除，请先取消保护标记。', error: true }); return; }
+    const permanent = snapshots.every(snapshot => snapshot.deletedAt);
+    if (!permanent && snapshots.some(snapshot => snapshot.deletedAt)) { setToast({ text: '请分别操作正常记录和已删除记录。', error: true }); return; }
+    setModal({ type: 'delete', gameId: snapshots[0].gameId, snapshots, permanent, returnTo });
+  }
+  function closeModal() {
+    setModal(modal && 'returnTo' in modal && modal.returnTo ? { type: modal.returnTo } : null);
+  }
+  function finishSelection(gameId: string, ids: string[]) {
+    const done = new Set(ids);
+    setViews(all => ({ ...all, [gameId]: { ...(all[gameId] ?? defaultView), selectedIds: (all[gameId]?.selectedIds ?? []).filter(id => !done.has(id)) } }));
+    setPointSelections(all => ({ ...all, [gameId]: { active: (all[gameId]?.active ?? []).filter(id => !done.has(id)), removed: (all[gameId]?.removed ?? []).filter(id => !done.has(id)) } }));
+  }
+  const recoverBatch = async (gameId: string, ids: string[], returnTo?: 'restore-points') => {
+    const report = await perform('正在找回记录', () => api.updateSnapshots(gameId, ids, { deleted: false }));
     if (!report) return;
-    updateView({ selectedIds: report.failed.map(item => item.id) }, gameId);
-    if (report.failed.length) setModal({ type: 'batch-report', report });
-    else setToast({ text: deleted ? '已将 ' + report.updated.length + ' 份存档移入回收站，可随时找回。' : '已找回 ' + report.updated.length + ' 份存档，原有标记已保留。' });
+    finishSelection(gameId, report.updated);
+    if (report.failed.length) setModal({ type: 'batch-report', report, returnTo });
+    else setToast({ text: '已找回 ' + report.updated.length + ' 份记录，原有标记保持不变。' });
+  }
+  const confirmDelete = async (deletion: Extract<ModalState, { type: 'delete' }>) => {
+    const ids = deletion.snapshots.map(snapshot => snapshot.id);
+    const report = await perform(deletion.permanent ? '正在永久删除文件' : '正在移除记录', () => deletion.permanent ? api.deleteSnapshots(deletion.gameId, ids) : api.updateSnapshots(deletion.gameId, ids, { deleted: true }));
+    if (!report) return;
+    finishSelection(deletion.gameId, report.updated);
+    if (report.failed.length) setModal({ type: 'batch-report', report, permanent: deletion.permanent, returnTo: deletion.returnTo });
+    else {
+      setToast({ text: (deletion.permanent ? '已永久删除 ' : '已移除 ') + report.updated.length + ' 份记录。' });
+      setModal(deletion.returnTo ? { type: deletion.returnTo } : null);
+    }
+  }
+  const batchProtect = async (selection: string[] | 'all', protectedTag: boolean) => {
+    const gameId = current.id;
+    const report = await perform(protectedTag ? '正在批量保护' : '正在批量取消保护', () => api.updateSnapshots(gameId, selection, { protected: protectedTag }));
+    if (!report) return;
+    if (report.failed.length) { updateView({ selectedIds: report.failed.map(item => item.id) }, gameId); setModal({ type: 'batch-report', report }); }
+    else setToast({ text: `已${protectedTag ? '保护' : '取消保护'} ${report.updated.length} 份存档。` });
   };
 
   return <>
@@ -153,11 +190,11 @@ export default function App() {
           {page === 'library' && current && <>
             <div className="page-heading"><div><div className="eyebrow">YOUR ADVENTURE, PRESERVED.</div><h1>每一次冒险，都值得珍藏<span className="heading-period">。</span></h1><p>存下此刻的勇气，随时回到热爱的世界。</p></div><span className="ink-seal" aria-hidden="true">存<br/>心</span></div>
             <section className="game-hero" aria-label={`${current.name}游戏概览`}><Landscape kind={current.icon}/><div className="hero-shade"/><div className="hero-content"><div className="hero-kicker"><span className="small-line"/>正在管理的游戏</div><div className="hero-title"><GameGlyph icon={current.icon} size={30}/><h2>{current.name}</h2></div><p className="game-subtitle">{current.subtitle || 'MY NEXT ADVENTURE'}</p><div className="hero-status"><span className={`status-dot ${current.pathStatus !== 'ready' ? 'warning' : ''}`}/>{current.pathStatus === 'ready' ? '存档目录已连接' : current.pathStatus === 'missing' ? '存档目录不可用，请检查设置' : '等待配置存档目录'}<span className="hero-status-divider"/> {state.platform === 'darwin' ? 'macOS · Apple Silicon' : 'Windows'}</div><div className="hero-actions"><button className="button primary" disabled={!!busy} onClick={openSave}><Plus size={17}/>{current.pathStatus === 'ready' ? '创建新存档' : '配置存档路径'}</button><button className="button subtle" disabled={!!busy} onClick={() => setModal({ type: 'game', game: current })}><Settings2 size={15}/>游戏设置</button></div></div><span className="hero-caption">{current.icon === 'ring' ? '交界之地 · 未完待续' : current.icon === 'spire' ? '高塔之上 · 再次启程' : current.icon === 'flame' ? '余火未熄 · 故事未完' : '下一场冒险 · 由你续写'}</span><span className="hero-index">0{games.indexOf(current) + 1} / 0{games.length}</span></section>
-            <section className="stats-row" aria-label="存档统计"><Stat icon={<Archive size={18}/>} label="珍藏的存档" value={String(saves.length).padStart(2, '0')} unit="份"/><Stat icon={<ShieldCheck size={18}/>} label="读档保护" value="已开启" detail="恢复前自动备份"/><Stat icon={<HardDrive size={18}/>} label="游戏存档占用" value={formatBytes(saves.reduce((sum, snapshot) => sum + snapshot.bytes, 0))} detail={`${totalFiles} 个文件`}/><Stat icon={<Clock3 size={18}/>} label="最近存档" value={saves[0] ? dateLabel(saves[0].createdAt) : '等待启程'} detail={saves[0] ? kinds[saves[0].kind] : '记录第一个游戏时刻'}/></section>
+            <section className="stats-row" aria-label="存档统计"><Stat icon={<Archive size={18}/>} label="全部存档" value={String(saves.length).padStart(2, '0')} unit="份"/><Stat icon={<ShieldCheck size={18}/>} label="读档保护" value="已开启" detail="恢复前自动备份"/><Stat icon={<HardDrive size={18}/>} label="全部存档占用" value={formatBytes(saves.reduce((sum, snapshot) => sum + snapshot.bytes, 0))} detail={`${totalFiles} 个文件`}/><Stat icon={<Clock3 size={18}/>} label="最近存档" value={saves[0] ? dateLabel(saves[0].createdAt) : '等待启程'} detail={saves[0] ? kinds[saves[0].kind] : '记录第一个游戏时刻'}/></section>
             <SnapshotList game={current} view={view} busy={!!busy} menu={menu} onMenu={setMenu} onViewChange={updateView} onAction={snapshotAction}
               onImport={runImport} onFolder={() => void perform('打开备份文件夹', () => api.openFolder('snapshots', current.id))} onCreate={openSave}
               onRestorePoints={() => setModal({ type: 'restore-points' })} onExport={selection => void exportBatch(selection)}
-              onDelete={snapshots => setModal({ type: 'batch-delete', gameId: current.id, snapshots })} onRecover={ids => void batchMark(current.id, ids, false)}/>
+              onDelete={snapshots => requestDelete(snapshots)} onRecover={ids => void recoverBatch(current.id, ids)} onProtect={(selection, protectedTag) => void batchProtect(selection, protectedTag)}/>
             <footer className="page-footer"><span>SAVE YOUR PROGRESS. KEEP YOUR STORIES.</span><span>每一次归来，都是新的开始。</span></footer>
           </>}
           {page === 'library' && !current && <div className="empty-library"><Landscape/><div><Gamepad2 size={40}/><h1>为你的冒险，建一个家。</h1><p>添加第一个游戏，开始管理它的存档与每一次重新出发。</p><button className="button primary" onClick={() => setModal({ type: 'game' })}><Plus size={17}/>添加游戏</button></div></div>}
@@ -171,14 +208,13 @@ export default function App() {
       </div>
     </div>
 
-    {modal && <Modal title={modalTitle(modal)} onClose={() => setModal(null)} busy={!!busy} wide={modal.type === 'game'}>
+    {modal && <Modal title={modalTitle(modal)} onClose={closeModal} busy={!!busy} wide={modal.type === 'game' || modal.type === 'restore-points'}>
       {modal.type === 'game' && <GameForm game={modal.game} platform={state.platform} api={api} busy={!!busy} onCancel={() => setModal(null)} onSave={async values => { const id = await perform('保存游戏设置', () => api.saveGame(values), '游戏设置已保存。', true); if (id) chooseGame(id); }} onDelete={modal.game ? () => setModal({ type: 'remove-game', game: modal.game! }) : undefined}/ >}
       {modal.type === 'save' && current && <SnapshotForm snapshot={modal.snapshot} busy={!!busy} onCancel={() => setModal(null)} onSave={values => perform(modal.snapshot ? '保存存档信息' : '正在创建存档', async () => { if (modal.snapshot) await api.updateSnapshot(current.id, modal.snapshot.id, values); else await api.saveSnapshot(current.id, values); }, modal.snapshot ? '存档信息已更新。' : '新存档已创建，文件校验通过。', true)}/ >}
       {modal.type === 'restore' && current && <RestoreConfirm snapshot={modal.snapshot} game={current} platform={state.platform} busy={!!busy} onCancel={() => setModal(null)} onConfirm={() => perform('正在安全恢复存档', () => api.restoreSnapshot(current.id, modal.snapshot.id), `已读取「${modal.snapshot.label}」，原进度已保存为读档恢复点。`, true)}/ >}
-      {modal.type === 'delete' && current && <><div className="dialog-symbol"><Trash2 size={26}/></div><p className="dialog-description">将「{modal.snapshot.label}」移入回收站？</p><p className="muted">存档文件会继续保留，可以随时从回收站找回。</p><div className="dialog-actions"><button className="button secondary" disabled={!!busy} onClick={() => setModal(null)}>取消</button><button className="button danger" disabled={!!busy} onClick={() => perform('移入回收站', () => api.updateSnapshot(current.id, modal.snapshot.id, { deleted: true }), '存档已移入回收站。', true)}>移入回收站</button></div></>}
-      {modal.type === 'batch-delete' && <><div className="dialog-symbol"><Trash2 size={26}/></div><p className="dialog-description">将选中的 {modal.snapshots.length} 份存档移入回收站？</p><p className="muted">只添加回收站标记，文件与原有收藏、保护标记会保留。</p><ul className="batch-confirm-list">{modal.snapshots.map(snapshot => <li key={snapshot.id}>{snapshot.label}</li>)}</ul><div className="dialog-actions"><button className="button secondary" disabled={!!busy} onClick={() => setModal(null)}>取消</button><button className="button danger" disabled={!!busy} onClick={() => void batchMark(modal.gameId, modal.snapshots.map(snapshot => snapshot.id), true)}>确认删除 {modal.snapshots.length} 份</button></div></>}
-      {modal.type === 'batch-report' && <><p className="dialog-description">已完成 {modal.report.updated.length} 份，未完成 {modal.report.failed.length} 份。</p><p className="muted">未完成的项目保留原状，可根据下列原因处理后重试。</p>{modal.report.failed.map(item => <div className="notice error" key={item.id}><strong>{item.label}</strong><p>{item.error}</p></div>)}<div className="dialog-actions"><button className="button secondary" onClick={() => setModal(null)}>关闭</button></div></>}
-      {modal.type === 'restore-points' && current && <><p className="form-description">每次读档前自动保留当前进度，用来撤销读档。恢复点独立保存，不计入游戏存档数量，也不属于“保护”标签。</p><div className="restore-points-list">{current.restorePoints.filter(point => !point.deletedAt).map(point => <div className="restore-point" key={point.id}><History size={20}/><div><strong>{point.label}</strong><small>{fullDate(point.createdAt)} · {formatBytes(point.bytes)}</small></div><button className="load-button" disabled={!!busy || point.corrupted || current.pathStatus !== 'ready'} onClick={() => setModal({ type: 'restore', snapshot: point })}><RotateCcw size={14}/>恢复</button><button className="icon-button" title="导出恢复点" aria-label={`导出恢复点 ${point.label}`} disabled={!!busy || point.corrupted} onClick={() => snapshotAction('export', point)}><Download size={15}/></button><button className="icon-button danger-text" title="移除恢复点" aria-label={`移除恢复点 ${point.label}`} disabled={!!busy || point.corrupted} onClick={() => void perform('移除恢复点', () => api.updateSnapshot(current.id, point.id, { deleted: true }))}><Trash2 size={15}/></button></div>)}</div>{!current.restorePoints.some(point => !point.deletedAt) && <div className="quiet-empty">还没有读档恢复点。第一次读档前会自动创建。</div>}{current.restorePoints.some(point => point.deletedAt) && <details className="removed-points"><summary>已移除的恢复点</summary>{current.restorePoints.filter(point => point.deletedAt).map(point => <div className="restore-point" key={point.id}><div><strong>{point.label}</strong><small>{fullDate(point.createdAt)}</small></div><button className="load-button" disabled={!!busy || point.corrupted} onClick={() => void perform('找回恢复点', () => api.updateSnapshot(current.id, point.id, { deleted: false }))}><RotateCcw size={14}/>找回</button></div>)}</details>}<div className="dialog-actions"><button className="button secondary" onClick={() => setModal(null)}>关闭</button></div></>}
+      {modal.type === 'delete' && <DeleteConfirmation snapshots={modal.snapshots} permanent={modal.permanent} busy={!!busy} onCancel={closeModal} onConfirm={() => void confirmDelete(modal)}/>}
+      {modal.type === 'batch-report' && <><p className="dialog-description">已完成 {modal.report.updated.length} 份，未完成 {modal.report.failed.length} 份。</p><p className="muted">{modal.permanent ? '部分文件可能已被删除；标记为“永久删除未完成”的记录只能继续清理，不能找回。' : '未完成的项目保留原状，可根据下列原因处理后重试。'}</p>{modal.report.failed.map(item => <div className="notice error" key={item.id}><strong>{item.label}</strong><p>{item.error}</p></div>)}<div className="dialog-actions"><button className="button secondary" onClick={closeModal}>关闭</button></div></>}
+      {modal.type === 'restore-points' && current && <><RestorePoints points={current.restorePoints} selection={pointSelections[current.id] ?? { active: [], removed: [] }} busy={!!busy} canRestore={current.pathStatus === 'ready'} onSelect={(group, ids) => setPointSelections(all => ({ ...all, [current.id]: { ...(all[current.id] ?? { active: [], removed: [] }), [group]: ids } }))} onRestore={snapshot => setModal({ type: 'restore', snapshot })} onExport={snapshot => snapshotAction('export', snapshot)} onDelete={snapshots => requestDelete(snapshots, 'restore-points')} onRecover={ids => void recoverBatch(current.id, ids, 'restore-points')}/><div className="dialog-actions"><button className="button secondary" onClick={() => setModal(null)}>关闭</button></div></>}
       {modal.type === 'remove-game' && <><div className="dialog-symbol"><Gamepad2 size={26}/></div><p className="dialog-description">移除「{modal.game.name}」这个游戏项目？</p><p className="muted">现有备份会保留，可在「设置与关于 → 已移除的游戏」中找回。游戏原文件不受影响。</p><div className="dialog-actions"><button className="button secondary" disabled={!!busy} onClick={() => setModal(null)}>取消</button><button className="button danger" disabled={!!busy} onClick={() => perform('移除游戏项目', () => api.removeGame(modal.game.id), '游戏项目已移除，备份仍然保留。', true)}>移除游戏</button></div></>}
       {modal.type === 'detail' && <><div className="detail-name"><Archive size={23}/><h3>{modal.snapshot.label}</h3></div><p className="detail-note">{modal.snapshot.note || '这份存档还没有添加备注。'}</p><dl className="details-grid"><dt>创建时间</dt><dd>{fullDate(modal.snapshot.createdAt)}</dd><dt>存档来源</dt><dd>{kinds[modal.snapshot.kind]}</dd><dt>当前标记</dt><dd>{[modal.snapshot.favorite && '已收藏', modal.snapshot.protected && '保护', modal.snapshot.deletedAt && '回收站'].filter(Boolean).join('、') || '无'}</dd><dt>文件数量</dt><dd>{modal.snapshot.fileCount} 个 · {formatBytes(modal.snapshot.bytes)}</dd><dt>来源平台</dt><dd>{modal.snapshot.platform === 'darwin' ? 'macOS' : 'Windows'}</dd><dt>备份项目</dt><dd>{modal.snapshot.entries.map(entry => <code key={entry}>{entry}</code>)}</dd><dt>唯一标识</dt><dd className="mono small-text">{modal.snapshot.id}</dd></dl>{modal.snapshot.absent?.length > 0 && <div className="notice">此恢复记录包含当时不存在的路径：{modal.snapshot.absent.join('、')}。恢复它会让这些路径重新回到不存在的状态。</div>}{modal.snapshot.corrupted && <div className="notice error">{modal.snapshot.error}</div>}<div className="dialog-actions"><button className="button secondary" onClick={() => setModal(null)}>关闭</button></div></>}
       {modal.type === 'import-report' && <><div className="import-summary"><span><strong>{modal.report.imported.length}</strong>导入成功</span><span><strong>{modal.report.skipped.length}</strong>重复跳过</span><span><strong>{modal.report.failed.length}</strong>未能导入</span></div><p className="muted">旧目录中的原文件已保留。成功导入的存档可在时光轴中查看。</p>{modal.report.imported.length > 0 && <div className="report-list">{modal.report.imported.map(name => <p key={name}><Check size={14}/>{name}</p>)}</div>}{modal.report.failed.map(item => <div className="notice error" key={item.name}><strong>{item.name}</strong><p>{item.error}</p></div>)}<div className="dialog-actions"><button className="button primary" onClick={() => setModal(null)}>完成</button></div></>}
@@ -189,6 +225,23 @@ export default function App() {
   </>;
 }
 
+function DeleteConfirmation({ snapshots, permanent, busy, onCancel, onConfirm }: { snapshots: Snapshot[]; permanent: boolean; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const points = snapshots.every(snapshot => snapshot.kind === 'safety');
+  const destination = points ? '已移除的恢复点' : '回收站';
+  const label = permanent ? '确认永久删除 ' + snapshots.length + ' 份' : points ? '确认移除 ' + snapshots.length + ' 份' : snapshots.length === 1 ? '移入回收站' : '确认删除 ' + snapshots.length + ' 份';
+  return <><p className="dialog-description">{permanent ? '永久删除以下 ' + snapshots.length + ' 份记录及其真实文件？' : '将以下 ' + snapshots.length + ' 份记录移入“' + destination + '”？'}</p>
+    {permanent && <div className="notice permanent-delete-warning" role="note"><Trash2 size={19}/><div><strong>永久删除，无法恢复</strong><p>文件将从磁盘中实际删除，操作完成后不能再找回。游戏目录中的当前进度不受影响。</p></div></div>}
+    <FavoriteDeleteNotice snapshots={snapshots} permanent={permanent}/><ul className="batch-confirm-list">{snapshots.map(snapshot => <li key={snapshot.id} className={snapshot.favorite ? 'favorite-delete-item' : undefined}>{snapshot.label}{snapshot.favorite && <span className="favorite-delete-tag"><Star size={12}/>已收藏</span>}</li>)}</ul>
+    {!permanent && <p className="muted">文件暂时保留。在“{destination}”中可多选或全选后找回，也可以再次确认后永久删除。</p>}
+    <div className="dialog-actions"><button className="button secondary" disabled={busy} onClick={onCancel}>取消</button><button className="button danger" disabled={busy || snapshots.some(snapshot => snapshot.protected)} onClick={onConfirm}>{label}</button></div></>;
+}
+
+function FavoriteDeleteNotice({ snapshots, permanent = false }: { snapshots: Snapshot[]; permanent?: boolean }) {
+  const count = snapshots.filter(snapshot => snapshot.favorite).length;
+  if (!count) return null;
+  return <div className="notice favorite-delete-warning" role="note" aria-label="包含已收藏存档"><Star size={22}/><div><strong>注意：本次删除包含 {count} 份已收藏存档</strong><p>{permanent ? '这些收藏记录及其文件也会永久删除，无法找回。确认后会继续删除。' : '请确认这些收藏记录也需要移除。确认后会继续删除，找回时仍保留收藏标记。'}</p></div></div>;
+}
+
 function Stat({ icon, label, value, unit, detail }: { icon: ReactNode; label: string; value: string; unit?: string; detail?: string }) {
   return <div className="stat"><div className="stat-label">{icon}{label}</div><div className="stat-value">{value}{unit && <span>{unit}</span>}</div>{detail && <small>{detail}</small>}</div>;
 }
@@ -196,7 +249,7 @@ function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: 
   return <div className="page-heading standalone"><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>;
 }
 function modalTitle(modal: ModalState) {
-  return ({ game: modal.type === 'game' && modal.game ? '游戏设置' : '添加游戏项目', save: modal.type === 'save' && modal.snapshot ? '编辑存档信息' : '珍藏这一刻', restore: '回到这个游戏时刻', delete: '移除存档', 'remove-game': '移除游戏项目', detail: '存档详情', 'restore-points': '读档恢复点', 'batch-delete': '批量移入回收站', 'batch-report': '批量操作结果', 'import-report': '导入结果', help: '与 SaveHub 一起出发' })[modal.type];
+  return ({ game: modal.type === 'game' && modal.game ? '游戏设置' : '添加游戏项目', save: modal.type === 'save' && modal.snapshot ? '编辑存档信息' : '珍藏这一刻', restore: '回到这个游戏时刻', delete: modal.type === 'delete' && modal.permanent ? '永久删除存档' : '移除存档', 'remove-game': '移除游戏项目', detail: '存档详情', 'restore-points': '读档恢复点', 'batch-report': '批量操作结果', 'import-report': '导入结果', help: '与 SaveHub 一起出发' })[modal.type];
 }
 
 function Modal({ title, children, onClose, busy, wide }: { title: string; children: ReactNode; onClose: () => void; busy: boolean; wide?: boolean }) {
@@ -249,5 +302,5 @@ function SnapshotForm({ snapshot, busy, onSave, onCancel }: { snapshot?: Snapsho
 }
 function RestoreConfirm({ snapshot, game, platform, busy, onConfirm, onCancel }: { snapshot: Snapshot; game: Game; platform: Platform; busy: boolean; onConfirm: () => Promise<unknown>; onCancel: () => void }) {
   const [confirmed, setConfirmed] = useState(false);
-  return <><div className="restore-card"><div className="dialog-symbol"><History size={27}/></div><h3>{snapshot.label}</h3><p>{fullDate(snapshot.createdAt)} · {formatBytes(snapshot.bytes)}</p></div><div className="restore-flow"><span><Archive size={18}/>选中的存档</span><ArrowRight size={17}/><span><GameGlyph icon={game.icon} size={18}/>{game.name}</span></div><div className="path-display compact"><Folder size={15}/><code>{game.locations[platform].root}</code></div><div className="notice"><ShieldCheck size={19}/><span>先保护，再恢复。当前进度会自动备份到「读档恢复点」，之后可用它撤销本次读档。</span></div><p className="muted small-text">将完整替换：{snapshot.entries.join('、')}。目录里新增的文件也会随之移除。</p><label className="confirm-checkbox"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)}/><span>我已关闭游戏，并暂停会写入存档的云同步。</span></label><div className="dialog-actions"><button className="button secondary" disabled={busy} onClick={onCancel}>暂不读档</button><button className="button primary" disabled={!confirmed || busy} onClick={onConfirm}>{busy ? <LoaderCircle size={16} className="spin"/> : <RotateCcw size={16}/>}确认读档</button></div></>;
+  return <><div className="restore-card"><div className="dialog-symbol"><History size={27}/></div><h3>{snapshot.label}</h3><p>{fullDate(snapshot.createdAt)} · {formatBytes(snapshot.bytes)}</p></div><div className="restore-flow"><span><Archive size={18}/>选中的存档</span><ArrowRight size={17}/><span><GameGlyph icon={game.icon} size={18}/>{game.name}</span></div><div className="path-display compact"><Folder size={15}/><code>{game.locations[platform].root}</code></div><div className="notice"><ShieldCheck size={19}/><span>应用会先自动保存当前进度到「读档恢复点」，校验成功后再读档；保存失败则停止读档。之后可用恢复点撤销本次读档。</span></div><p className="muted small-text">将完整替换：{snapshot.entries.join('、')}。目录里新增的文件也会随之移除。</p><label className="confirm-checkbox"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)}/><span>我已关闭游戏，并暂停会写入存档的云同步。</span></label><div className="dialog-actions"><button className="button secondary" disabled={busy} onClick={onCancel}>暂不读档</button><button className="button primary" disabled={!confirmed || busy} onClick={onConfirm}>{busy ? <LoaderCircle size={16} className="spin"/> : <RotateCcw size={16}/>}确认读档</button></div></>;
 }

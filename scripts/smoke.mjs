@@ -96,7 +96,10 @@ try {
   checks.push('Restore confirmation, actual bytes replaced, and safety snapshot verified');
 
   await page.getByRole('button', { name: 'UI 测试 · 创建并恢复 更多操作', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: '移入回收站', exact: true })).toBeEnabled();
   await page.getByRole('menuitem', { name: '移入回收站', exact: true }).click();
+  await expect(dialog.getByRole('note', { name: '包含已收藏存档' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '移入回收站', exact: true })).toBeEnabled();
   await dialog.getByRole('button', { name: '移入回收站', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await page.getByRole('tab', { name: '回收站', exact: true }).click();

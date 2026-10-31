@@ -93,6 +93,7 @@ function registerHandlers() {
   register('restoreSnapshot', (gameId, id) => store.restoreSnapshot(gameId, id));
   register('updateSnapshot', (gameId, id, details) => store.updateSnapshot(gameId, id, details));
   register('updateSnapshots', (gameId, ids, details) => store.updateSnapshots(gameId, ids, details));
+  register('deleteSnapshots', (gameId, ids) => store.deleteSnapshots(gameId, ids));
   register('verifySnapshot', (gameId, id) => store.verifySnapshot(gameId, id));
   register('importSnapshots', async (id, useLegacy) => {
     const game = store.game(id);
