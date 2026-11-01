@@ -65,6 +65,28 @@ try {
   const row = id => page.locator(`[data-snapshot-id="${id}"]`);
   const ids = () => rows.evaluateAll(elements => elements.map(element => element.dataset.snapshotId));
   const idle = () => expect(page.locator('.progress-panel')).toHaveCount(0);
+  const exportAndRead = async action => {
+    const before = await fs.readdir(exportsDir);
+    await action(); await idle();
+    const created = (await fs.readdir(exportsDir)).filter(name => !before.includes(name));
+    assert.equal(created.length, 1, 'Each export creates exactly one outer folder');
+    const folder = path.join(exportsDir, created[0]);
+    const [index] = await fs.readdir(path.join(folder, '.savehub-exports'));
+    const collection = JSON.parse(await fs.readFile(path.join(folder, '.savehub-exports', index), 'utf8'));
+    for (const item of collection.snapshots) {
+      assert.deepEqual(await fs.readFile(path.join(folder, item.directory, 'saves/progress.dat')), await fs.readFile(path.join(store.snapshotDir(item.manifest.gameId, item.manifest.id), 'payload/saves/progress.dat')));
+    }
+    return { folder, collection };
+  };
+  const exportTab = async (name, expectedIds) => {
+    const button = page.getByRole('button', { name: '导出全部', exact: true });
+    await expect(button).toHaveAttribute('title', new RegExp(`「${name}」.*不受搜索影响`));
+    const pickerCalls = await application.evaluate(() => globalThis.__pickerCalls);
+    const result = await exportAndRead(() => button.click());
+    assert.equal(await application.evaluate(() => globalThis.__pickerCalls), pickerCalls + 1);
+    assert.deepEqual(result.collection.snapshots.map(item => item.manifest.id).sort(), [...expectedIds].sort());
+    return result;
+  };
   const gameState = () => page.evaluate(async id => (await window.savehub.state()).games.find(game => game.id === id), gameA);
   const pickGame = name => page.getByRole('navigation', { name: '游戏列表', exact: true }).getByRole('button', { name: new RegExp(name) }).click();
   const themeButton = page.getByRole('button', { name: '切换主题', exact: true });
@@ -145,7 +167,7 @@ try {
 
   await search.fill('');
   await expect(page.getByRole('checkbox', { name: '全选当前列表', exact: true })).not.toBeChecked();
-  await expect(page.getByRole('button', { name: '保护所选存档', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '所选保护', exact: true })).toBeDisabled();
   for (const name of ['收藏所选', '取消收藏所选', '收藏全部', '取消收藏全部']) await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   await row(a.id).getByRole('button', { name: /更多操作$/ }).click();
   await expect(page.getByRole('menuitem', { name: '移入回收站', exact: true })).toBeEnabled();
@@ -167,20 +189,20 @@ try {
   await page.getByRole('tab', { name: '已收藏', exact: true }).click();
   await expect(rows).toHaveCount(2);
   await page.getByRole('checkbox', { name: '全选当前列表', exact: true }).check();
-  await expect(page.getByRole('button', { name: '保护所选存档', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '所选保护', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: '删除所选', exact: true })).toBeDisabled();
   await row(protectedSave.id).getByRole('button', { name: /更多操作$/ }).click();
   await expect(page.getByRole('menuitem', { name: '移入回收站', exact: true })).toBeDisabled();
   await page.getByRole('heading', { name: '验证游戏 A', exact: true }).click();
-  await page.getByRole('button', { name: '保护所选存档', exact: true }).click(); await idle();
-  await expect(page.getByRole('button', { name: '取消保护所选存档', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '所选保护', exact: true }).click(); await idle();
+  await expect(page.getByRole('button', { name: '所选取消保护', exact: true })).toBeEnabled();
   assert((await gameState()).snapshots.filter(item => [a.id, protectedSave.id].includes(item.id)).every(item => item.protected && item.favorite));
-  await page.getByRole('button', { name: '取消保护所选存档', exact: true }).click(); await idle();
-  await expect(page.getByRole('button', { name: '保护所选存档', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '所选取消保护', exact: true }).click(); await idle();
+  await expect(page.getByRole('button', { name: '所选保护', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: '删除所选', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: '保护所选存档', exact: true }).click(); await idle();
+  await page.getByRole('button', { name: '所选保护', exact: true }).click(); await idle();
   await expect(page.getByRole('button', { name: '删除所选', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: '取消保护所选存档', exact: true }).click(); await idle();
+  await page.getByRole('button', { name: '所选取消保护', exact: true }).click(); await idle();
   assert.equal((await gameState()).snapshots.length, 6);
   done('Selected protection toggles correctly for mixed, entirely unprotected and entirely protected records; protection blocks deletion');
 
@@ -213,7 +235,8 @@ try {
   await expect(rows).toHaveCount(3);
   await row(a.id).getByRole('checkbox').check();
   await row(protectedSave.id).getByRole('checkbox').check();
-  await expect(page.getByRole('button', { name: '保护所选存档', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '所选保护', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /^全部(取消)?保护$/ })).toHaveCount(0);
   await application.evaluate(({ dialog }, folder) => { globalThis.__pickerCalls = 0; dialog.showOpenDialog = async () => { globalThis.__pickerCalls++; return { canceled: false, filePaths: [folder] }; }; }, exportsDir);
   await page.getByRole('button', { name: '导出所选', exact: true }).click();
   await idle();
@@ -263,8 +286,30 @@ try {
 
   await search.fill('没有任何匹配的存档');
   await expect(rows).toHaveCount(0);
-  await page.getByRole('button', { name: '保护全部存档', exact: true }).click(); await idle();
-  await expect(page.getByRole('button', { name: '取消保护全部存档', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '全部取消保护', exact: true })).toBeEnabled();
+  const protectedExport = await exportTab('保护存档', [protectedSave.id]);
+  assert.equal(path.basename(protectedExport.folder), '验证游戏 A-存档导出 (2)');
+
+  await page.getByRole('tab', { name: '已收藏', exact: true }).click();
+  await expect(rows).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '全部保护', exact: true })).toHaveAttribute('title', /「已收藏」.*2 份/);
+  await page.getByRole('button', { name: '全部保护', exact: true }).click(); await idle();
+  await expect(page.getByRole('button', { name: '全部取消保护', exact: true })).toBeEnabled();
+  assert.deepEqual((await gameState()).snapshots.filter(item => item.protected).map(item => item.id).sort(), [a.id, protectedSave.id].sort());
+  await exportTab('已收藏', [a.id, protectedSave.id]);
+  await page.getByRole('button', { name: '全部取消保护', exact: true }).click(); await idle();
+  assert((await gameState()).snapshots.every(item => !item.protected));
+  await page.getByRole('button', { name: '全部保护', exact: true }).click(); await idle();
+  await page.getByRole('tab', { name: '保护存档', exact: true }).click();
+  await page.getByRole('button', { name: '全部取消保护', exact: true }).click(); await idle();
+  assert((await gameState()).snapshots.every(item => !item.protected));
+  await expect(page.getByRole('button', { name: '全部保护', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '导出全部', exact: true })).toBeDisabled();
+  done('Favorite-tab protection changes only favorites; protected-tab unprotect empties that tab and disables all actions, independently of search');
+
+  await page.getByRole('tab', { name: '全部存档', exact: true }).click();
+  await expect(rows).toHaveCount(0);
+  await page.getByRole('button', { name: '全部保护', exact: true }).click(); await idle();
   const allProtectedState = await gameState();
   assert.deepEqual(allProtectedState.snapshots.filter(item => item.protected).map(item => item.id).sort(), [a.id, b.id, c.id, imported.id, protectedSave.id].sort());
   assert.deepEqual(allProtectedState.snapshots.filter(item => item.favorite).map(item => item.id).sort(), [a.id, protectedSave.id].sort());
@@ -272,55 +317,57 @@ try {
   assert.equal(allProtectedState.snapshots.find(item => item.id === trashed.id).protected, false);
   const otherGame = await page.evaluate(async id => (await window.savehub.state()).games.find(game => game.id === id), gameB);
   assert(otherGame.snapshots.every(item => !item.protected));
+  const allExport = await exportTab('全部存档', [a.id, b.id, c.id, imported.id, protectedSave.id]);
+  assert.equal(allExport.collection.snapshots.find(item => item.manifest.id === a.id).directory, a.label);
   await expect(rows).toHaveCount(0);
-  await page.getByRole('button', { name: '取消保护全部存档', exact: true }).click(); await idle();
-  await expect(page.getByRole('button', { name: '保护全部存档', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '全部取消保护', exact: true }).click(); await idle();
+  await expect(page.getByRole('button', { name: '全部保护', exact: true })).toBeEnabled();
   assert((await gameState()).snapshots.every(item => !item.protected));
-  await page.getByRole('button', { name: '保护全部存档', exact: true }).click(); await idle();
-  await expect(page.getByRole('button', { name: '取消保护全部存档', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: '取消保护全部存档', exact: true }).click(); await idle();
-  await search.fill('');
+  done('All-save-tab protection and export include every active save while excluding trash, restore points and other games');
+
+  await page.getByRole('tab', { name: '回收站', exact: true }).click();
+  await expect(rows).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^全部(取消)?保护$/ })).toHaveCount(0);
+  const trashExport = await exportTab('回收站', [trashed.id]);
+  assert(trashExport.collection.snapshots.every(item => item.manifest.deletedAt));
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(indexDir, selectedIndex), 'utf8')), selectedCollection);
+
+  // A game with only trash must still be able to export that tab.
+  const otherIds = otherGame.snapshots.map(item => item.id);
+  await page.evaluate(async ({ gameId, ids }) => window.savehub.updateSnapshots(gameId, ids, { deleted: true }), { gameId: gameB, ids: otherIds });
+  await page.reload(); await pickGame('验证游戏 B');
+  await page.getByRole('tab', { name: '全部存档', exact: true }).click();
+  await expect(page.getByRole('button', { name: '导出全部', exact: true })).toBeDisabled();
+  await page.getByRole('tab', { name: '回收站', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /^全部(取消)?保护$/ })).toHaveCount(0);
+  await exportTab('回收站', otherIds);
+  done('Export all follows every tab including trash-only games; trash has no all-protection button and search does not narrow the export');
+
+  const exportedFiles = await fs.readdir(exportsDir);
+  await application.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); });
+  await page.getByRole('button', { name: '导出全部', exact: true }).click(); await idle();
+  assert.deepEqual(await fs.readdir(exportsDir), exportedFiles);
+  done('Cancelling the current-tab export creates no output');
+
+  await pickGame('验证游戏 A'); await search.fill('');
   await page.getByRole('tab', { name: '已收藏', exact: true }).click();
   await row(protectedSave.id).getByRole('button', { name: /更多操作$/ }).click();
   await page.getByRole('menuitem', { name: '标记为保护存档', exact: true }).click(); await idle();
   await page.getByRole('tab', { name: '保护存档', exact: true }).click();
-  await search.fill('没有任何匹配的存档');
-  done('All-record protection toggles for all three states despite search/filter, excludes trash/restore points and preserves favorites and other games');
-  await page.getByRole('button', { name: '导出全部存档', exact: true }).click(); await idle();
-  assert.equal(await application.evaluate(() => globalThis.__pickerCalls), 2);
-  const allBundleName = (await fs.readdir(exportsDir)).find(name => name !== selectedBundleName);
-  assert.equal(allBundleName, '验证游戏 A-存档导出 (2)');
-  const allIndexDir = path.join(exportsDir, allBundleName, '.savehub-exports');
-  const [allIndex] = await fs.readdir(allIndexDir);
-  const allCollection = JSON.parse(await fs.readFile(path.join(allIndexDir, allIndex), 'utf8'));
-  assert.deepEqual(allCollection.snapshots.map(item => item.manifest.id).sort(), [a.id, b.id, c.id, imported.id, protectedSave.id].sort());
-  assert.equal(allCollection.snapshots.find(item => item.manifest.id === a.id).directory, a.label);
-  assert.deepEqual(JSON.parse(await fs.readFile(path.join(indexDir, selectedIndex), 'utf8')), selectedCollection);
-  await search.fill('');
-  await row(protectedSave.id).getByRole('checkbox').check();
-  const exportedFiles = await fs.readdir(exportsDir);
-  await application.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); });
-  await page.getByRole('button', { name: '导出所选', exact: true }).click(); await idle();
-  assert.deepEqual(await fs.readdir(exportsDir), exportedFiles);
-  done('Export all includes protected records regardless of search/filter, preserves existing folders and cancels without creating output');
-
   await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, exportsDir);
   await row(protectedSave.id).getByRole('button', { name: /更多操作$/ }).click();
-  await page.getByRole('menuitem', { name: '导出存档', exact: true }).click(); await idle();
-  const singleBundle = path.join(exportsDir, '验证游戏 A-存档导出 (3)');
+  const { folder: singleBundle } = await exportAndRead(() => page.getByRole('menuitem', { name: '导出存档', exact: true }).click());
   assert.deepEqual((await fs.readdir(singleBundle)).sort(), ['.savehub-exports', protectedSave.label].sort());
   await expect(page.locator('.toast')).toContainText(singleBundle);
 
   await page.getByRole('button', { name: /^读档恢复点/ }).click();
   await expect(dialog.locator('.restore-points-list .restore-point')).toHaveCount(1);
-  await dialog.getByRole('button', { name: /^导出恢复点/ }).click(); await idle();
-  const pointBundle = path.join(exportsDir, '验证游戏 A-存档导出 (4)');
-  const [pointIndex] = await fs.readdir(path.join(pointBundle, '.savehub-exports'));
-  const pointCollection = JSON.parse(await fs.readFile(path.join(pointBundle, '.savehub-exports', pointIndex), 'utf8'));
+  const { folder: pointBundle, collection: pointCollection } = await exportAndRead(() => dialog.getByRole('button', { name: /^导出恢复点/ }).click());
   assert.equal(pointCollection.snapshots.length, 1);
   assert.equal(pointCollection.snapshots[0].manifest.id, safetyId);
   assert.deepEqual(await fs.readFile(path.join(pointBundle, pointCollection.snapshots[0].directory, 'saves/progress.dat')), recoveryBytes);
-  assert.equal((await fs.readdir(exportsDir)).length, 4);
+  assert.equal((await fs.readdir(exportsDir)).length, 8);
   done('Single-save and restore-point export actions each create their own complete outer folder');
   await dialog.getByRole('button', { name: '恢复', exact: true }).click();
   await dialog.getByRole('checkbox', { name: '我已关闭游戏，并暂停会写入存档的云同步。', exact: true }).check();
@@ -350,6 +397,34 @@ try {
   await page.locator('main').evaluate(element => { element.scrollTop = element.scrollHeight; });
   await page.screenshot({ path: path.join(screenshots, 'batch-selection.png'), animations: 'disabled' });
   done('Selection controls and all table columns fit the minimum 1080 x 760 desktop window');
+
+  await page.getByRole('button', { name: '取消选择', exact: true }).click();
+  await row(protectedSave.id).getByRole('checkbox').check();
+  for (const [theme, name] of [['ink', '水墨'], ['tech', '科技'], ['cyber', '赛博朋克'], ['glass', '玻璃拟态']]) {
+    await themeButton.click();
+    await page.getByRole('button', { name: `切换${name}主题`, exact: true }).click(); await idle();
+    await themeButton.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const protect = page.getByRole('button', { name: '全部保护', exact: true });
+    const unprotect = page.getByRole('button', { name: '所选取消保护', exact: true });
+    await expect(protect).toBeEnabled(); await expect(unprotect).toBeEnabled();
+    await expect(protect.locator('svg.lucide-shield-check')).toHaveCount(1);
+    await expect(unprotect.locator('svg.lucide-shield-off')).toHaveCount(1);
+    const colors = await page.locator('.batch-actions .protection-action').evaluateAll(buttons => buttons.map(button => {
+      const style = getComputedStyle(button);
+      return { color: style.color, background: style.backgroundColor, border: style.borderTopColor };
+    }));
+    assert.notEqual(colors[0].color, colors[1].color);
+    assert.notEqual(colors[0].background, colors[1].background);
+    assert.notEqual(colors[0].border, colors[1].border);
+    assert(await page.locator('.batch-actions').evaluate(element => element.scrollWidth <= element.clientWidth));
+    await page.locator('.batch-toolbar').screenshot({ path: path.join(screenshots, `protection-actions-${theme}.png`), animations: 'disabled' });
+  }
+  await page.getByRole('button', { name: '所选取消保护', exact: true }).click(); await idle();
+  await expect(page.getByRole('button', { name: '所选保护', exact: true }).locator('svg.lucide-shield-check')).toHaveCount(1);
+  await page.getByRole('button', { name: '全部保护', exact: true }).click(); await idle();
+  await expect(page.getByRole('button', { name: '全部取消保护', exact: true }).locator('svg.lucide-shield-off')).toHaveCount(1);
+  done('Protect and unprotect buttons use distinct shield icons and text/background/border colors in all four themes, with matching selected/all actions');
 
   assert.deepEqual(errors, []);
   const report = { success: true, date: new Date().toISOString(), executable: process.env.SAVEHUB_TEST_EXECUTABLE || 'Electron development runtime', fixture: 'Isolated synthetic saves; no real game data modified.', checks, rendererErrors: errors };

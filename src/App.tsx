@@ -120,7 +120,7 @@ export default function App() {
     if (action === 'verify') { void perform('正在校验存档', async () => { const result = await api.verifySnapshot(current.id, snapshot.id); setToast({ text: '完整性校验通过，' + result.fileCount + ' 个文件均完好。' }); }); return; }
     if (action === 'export') void perform('正在导出存档', async () => { const result = await api.exportSnapshot(current.id, snapshot.id); if (result) setToast({ text: '已导出到 ' + result }); });
   };
-  const exportBatch = (selection: string[] | 'all') => perform('正在批量导出存档', async () => {
+  const exportBatch = (selection: string[]) => perform('正在批量导出存档', async () => {
     const result = await api.exportSnapshots(current.id, selection);
     if (result) setToast({ text: '已导出 ' + result.count + ' 份存档到 ' + result.folder });
   });
@@ -157,7 +157,7 @@ export default function App() {
       setModal(deletion.returnTo ? { type: deletion.returnTo } : null);
     }
   }
-  const batchProtect = async (selection: string[] | 'all', protectedTag: boolean) => {
+  const batchProtect = async (selection: string[], protectedTag: boolean) => {
     const gameId = current.id;
     const report = await perform(protectedTag ? '正在批量保护' : '正在批量取消保护', () => api.updateSnapshots(gameId, selection, { protected: protectedTag }));
     if (!report) return;

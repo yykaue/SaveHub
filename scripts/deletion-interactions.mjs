@@ -65,10 +65,11 @@ try {
   await expect(rows).toHaveCount(1);
   await expect(row(kept.id)).toBeVisible();
   await tab('回收站'); await expect(rows).toHaveCount(4);
+  await expect(page.getByRole('button', { name: /^全部(取消)?保护$/ })).toHaveCount(0);
   await expect(row(pending.id)).toContainText('永久删除未完成');
   await expect(row(pending.id).getByRole('button', { name: '找回', exact: true })).toBeDisabled();
   await row(pending.id).getByRole('checkbox').check();
-  for (const name of ['找回所选', '保护所选存档', '导出所选']) await expect(page.getByRole('button', { name, exact: true })).toBeDisabled();
+  for (const name of ['找回所选', '所选保护', '导出所选']) await expect(page.getByRole('button', { name, exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '永久删除所选', exact: true }).click();
   await expect(dialog).toContainText('永久删除，无法恢复');
   await confirm('确认永久删除 1 份'); await expect(rows).toHaveCount(3);
@@ -152,11 +153,12 @@ try {
   // Reproduce an older version's protected trash record without bypassing the new API guard.
   await atomicJson(path.join(store.snapshotDir(gameId, kept.id), 'manifest.json'), { ...await store.readSnapshot(gameId, kept.id), deletedAt: new Date().toISOString() });
   await page.reload(); await tab('回收站'); await expect(rows).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /^全部(取消)?保护$/ })).toHaveCount(0);
   await all.check(); await expect(page.getByRole('button', { name: '永久删除所选', exact: true })).toBeDisabled();
   await row(kept.id).getByRole('button', { name: /更多操作$/ }).click();
   await expect(page.getByRole('menuitem', { name: '永久删除', exact: true })).toBeDisabled();
   await expect(page.getByRole('menuitem', { name: '取消保护标记', exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: '取消保护所选存档', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '所选取消保护', exact: true })).toBeDisabled();
   await page.getByRole('menuitem', { name: '找回存档', exact: true }).click(); await idle();
   await tab('保护存档'); await expect(rows).toHaveCount(1);
   await row(kept.id).getByRole('button', { name: /更多操作$/ }).click();

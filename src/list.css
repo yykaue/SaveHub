@@ -29,6 +29,10 @@
 .batch-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
 .batch-actions .button { font-size: 10px; }
 .batch-actions .export-all { margin-left: 3px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 25%, var(--line)); }
+.batch-actions .protection-action { --protection-tone: var(--protect-on); color: var(--protection-tone); border-color: color-mix(in srgb, var(--protection-tone) 45%, var(--line-strong)); background: color-mix(in srgb, var(--protection-tone) 7%, var(--surface)); }
+.batch-actions .protection-action.unprotect { --protection-tone: var(--protect-off); }
+.batch-actions .protection-action:hover:not(:disabled) { color: var(--protection-tone); border-color: var(--protection-tone); background: color-mix(in srgb, var(--protection-tone) 13%, var(--surface)); }
+.batch-actions .protection-action:focus-visible { outline-color: var(--protection-tone); }
 .snapshot-table .table-header, .snapshot-table .snapshot-row { grid-template-columns: 22px minmax(170px, 1fr) 144px 95px 148px; gap: 12px; }
 .table-header { min-height: 40px; }
 .table-header [role='columnheader'] { min-width: 0; }

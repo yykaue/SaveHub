@@ -106,7 +106,7 @@ function registerHandlers() {
   });
   register('exportSnapshots', async (gameId, ids) => {
     store.game(gameId);
-    const directory = await chooseFolder(ids === 'all' ? '导出当前游戏的全部存档' : '选择所选存档的统一导出位置');
+    const directory = await chooseFolder('选择存档的统一导出位置');
     return directory ? store.exportSnapshots(gameId, ids, directory) : null;
   });
   register('openFolder', async (kind, gameId) => {

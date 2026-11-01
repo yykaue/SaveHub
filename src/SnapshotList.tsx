@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Archive, ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, Download, FileBox, FolderOpen, History, Info, MoreHorizontal, Pencil, RotateCcw, Search, ShieldCheck, Star, Trash2, Upload, X } from 'lucide-react';
+import { Archive, ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, Download, FileBox, FolderOpen, History, Info, MoreHorizontal, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Star, Trash2, Upload, X } from 'lucide-react';
 import { dateLabel, formatBytes, kinds } from './format';
 import type { Game, Snapshot } from './types';
 
@@ -8,6 +8,7 @@ export type SortKey = 'label' | 'createdAt' | 'bytes';
 export interface LibraryView { filter: Filter; query: string; sort: { key: SortKey; direction: 'asc' | 'desc' }; selectedIds: string[] }
 export const defaultView: LibraryView = { filter: 'all', query: '', sort: { key: 'createdAt', direction: 'desc' }, selectedIds: [] };
 export type SnapshotAction = 'detail' | 'edit' | 'verify' | 'export' | 'delete' | 'favorite' | 'protect' | 'restore' | 'recover';
+const filterLabels: Record<Filter, string> = { all: '全部存档', favorite: '已收藏', protected: '保护存档', trash: '回收站' };
 
 export function matchesFilter(snapshot: Snapshot, filter: Filter) {
   if (snapshot.kind === 'safety') return false;
@@ -23,13 +24,15 @@ export function SnapshotList({ game, view, busy, menu, onMenu, onViewChange, onA
   onMenu: (id: string | null) => void; onViewChange: (changes: Partial<LibraryView>) => void;
   onAction: (action: SnapshotAction, snapshot: Snapshot) => void;
   onImport: (legacy?: boolean) => void; onFolder: () => void; onCreate: () => void; onRestorePoints: () => void;
-  onExport: (selection: string[] | 'all') => void; onDelete: (snapshots: Snapshot[]) => void; onRecover: (ids: string[]) => void;
-  onProtect: (selection: string[] | 'all', protectedTag: boolean) => void;
+  onExport: (ids: string[]) => void; onDelete: (snapshots: Snapshot[]) => void; onRecover: (ids: string[]) => void;
+  onProtect: (ids: string[], protectedTag: boolean) => void;
 }) {
   const { filter, query, sort } = view;
   const [menuAbove, setMenuAbove] = useState(false);
   const saves = game.snapshots.filter(snapshot => !snapshot.deletedAt);
-  const list = game.snapshots.filter(snapshot => matchesFilter(snapshot, filter) && `${snapshot.label} ${snapshot.note || ''}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
+  const tabSnapshots = game.snapshots.filter(snapshot => matchesFilter(snapshot, filter));
+  const tabScope = `「${filterLabels[filter]}」标签页的全部 ${tabSnapshots.length} 份存档，不受搜索影响`;
+  const list = tabSnapshots.filter(snapshot => `${snapshot.label} ${snapshot.note || ''}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
     let comparison;
     if (sort.key === 'label') comparison = a.label.localeCompare(b.label, 'zh-CN', { numeric: true, sensitivity: 'base' });
     else if (sort.key === 'bytes') comparison = a.bytes - b.bytes;
@@ -44,7 +47,7 @@ export function SnapshotList({ game, view, busy, menu, onMenu, onViewChange, onA
   const selectedPending = selected.some(snapshot => snapshot.purgePending);
   const selectedTrashed = selected.some(snapshot => snapshot.deletedAt);
   const protectSelected = !selected.length || selectedProtected !== selected.length;
-  const protectAll = !saves.length || !saves.every(snapshot => snapshot.protected);
+  const protectAll = !tabSnapshots.length || !tabSnapshots.every(snapshot => snapshot.protected);
   const nextDirection = (key: SortKey) => key === sort.key ? sort.direction === 'asc' ? 'desc' : 'asc' : key === 'createdAt' ? 'desc' : 'asc';
   const changeSort = (key: SortKey) => onViewChange({ sort: { key, direction: nextDirection(key) } });
   const selectRow = (snapshot: Snapshot) => onViewChange({ selectedIds: view.selectedIds.includes(snapshot.id) ? view.selectedIds.filter(id => id !== snapshot.id) : [...view.selectedIds, snapshot.id] });
@@ -85,12 +88,12 @@ export function SnapshotList({ game, view, busy, menu, onMenu, onViewChange, onA
       <span className="selection-summary" aria-live="polite">{selected.length ? <>已选 <strong>{selected.length}</strong> 份{selectedProtected > 0 && (filter === 'trash' ? ' · 含保护存档，需找回并取消保护后才能删除' : ' · 含保护存档，删除前需取消保护')}</> : filter === 'trash' ? '勾选存档，可批量找回、永久删除或导出' : '勾选存档，可批量保护、删除或导出'}</span>
       {selected.length > 0 && <button className="text-button clear-selection" disabled={busy} onClick={() => onViewChange({ selectedIds: [] })}>取消选择</button>}
       <div className="batch-actions">
-        <button className="button secondary small" disabled={filter === 'trash' || !selected.length || selectedTrashed || selectedPending || busy} title={filter === 'trash' || selectedTrashed ? '请先找回存档，再修改保护标记' : undefined} onClick={() => onProtect(selected.map(snapshot => snapshot.id), protectSelected)}><ShieldCheck size={14}/>{protectSelected ? '保护所选存档' : '取消保护所选存档'}</button>
-        <button className="button secondary small" disabled={!saves.length || busy} title="处理本游戏全部未删除的手动及导入记录，包含保护存档；不受搜索和筛选影响，不含回收站与读档恢复点。全部已保护时取消保护，否则统一保护。" onClick={() => onProtect('all', protectAll)}><ShieldCheck size={14}/>{protectAll ? '保护全部存档' : '取消保护全部存档'}</button>
+        <button className={`button secondary small protection-action ${protectSelected ? 'protect' : 'unprotect'}`} disabled={filter === 'trash' || !selected.length || selectedTrashed || selectedPending || busy} title={filter === 'trash' || selectedTrashed ? '请先找回存档，再修改保护标记' : undefined} onClick={() => onProtect(selected.map(snapshot => snapshot.id), protectSelected)}>{protectSelected ? <ShieldCheck size={14}/> : <ShieldOff size={14}/>}{protectSelected ? '所选保护' : '所选取消保护'}</button>
+        {filter !== 'trash' && <button className={`button secondary small protection-action ${protectAll ? 'protect' : 'unprotect'}`} disabled={!tabSnapshots.length || busy} title={`${protectAll ? '保护' : '取消保护'}${tabScope}。`} onClick={() => onProtect(tabSnapshots.map(snapshot => snapshot.id), protectAll)}>{protectAll ? <ShieldCheck size={14}/> : <ShieldOff size={14}/>}{protectAll ? '全部保护' : '全部取消保护'}</button>}
         {filter === 'trash' && <button className="button secondary small" disabled={!selected.length || selectedPending || busy} onClick={() => onRecover(selected.map(snapshot => snapshot.id))}><RotateCcw size={14}/>找回所选</button>}
         <button className="button secondary small danger-text" disabled={!selected.length || busy || selectedProtected > 0} title={selectedProtected ? '所选记录含保护存档，请先取消保护标记' : undefined} onClick={() => onDelete(selected)}><Trash2 size={14}/>{filter === 'trash' ? '永久删除所选' : '删除所选'}</button>
         <button className="button secondary small" disabled={!selected.length || selectedPending || busy} onClick={() => onExport(selected.map(snapshot => snapshot.id))}><Download size={14}/>导出所选</button>
-        <button className="button secondary small export-all" disabled={!ordinaryCount || busy} title="导出全部存档中的记录，包含收藏和保护标记，不受搜索及筛选影响；不含回收站与读档恢复点" onClick={() => onExport('all')}><Download size={14}/>导出全部存档</button>
+        <button className="button secondary small export-all" disabled={!tabSnapshots.length || busy} title={`导出${tabScope}。`} onClick={() => onExport(tabSnapshots.map(snapshot => snapshot.id))}><Download size={14}/>导出全部</button>
       </div>
     </div>
     <div className="snapshot-results">
