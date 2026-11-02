@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512" fill="none">
   <title>SaveHub</title>
-  <desc>An S-shaped save trail and a mint checkpoint, on a deep teal rounded square.</desc>
+  <desc>An S-shaped save trail and a red checkpoint, on a deep teal rounded square.</desc>
   <defs>
     <linearGradient id="savehub-tile" x1="80" y1="40" x2="432" y2="488" gradientUnits="userSpaceOnUse">
       <stop stop-color="#234C50"/>
@@ -10,5 +10,5 @@
   <rect x="24" y="24" width="464" height="464" rx="120" fill="url(#savehub-tile)"/>
   <rect x="25" y="25" width="462" height="462" rx="119" stroke="#FFFFFF" stroke-opacity=".12" stroke-width="2"/>
   <path d="M318 138H212c-48 0-80 28-80 69s32 68 80 68h88c16 0 26 9 26 23s-10 23-26 23H152v53h148c48 0 80-29 80-76s-32-76-80-76h-88c-16 0-26-7-26-16s10-15 26-15h106v-53Z" fill="#F2F5EB"/>
-  <circle cx="370" cy="164" r="28" fill="#A8E5BB"/>
+  <circle cx="370" cy="164" r="28" fill="#EF4444"/>
 </svg>
