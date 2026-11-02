@@ -98,8 +98,10 @@ function registerHandlers() {
   register('importSnapshots', async (id, useLegacy) => {
     const game = store.game(id);
     const directory = useLegacy && game.legacyRoot ? game.legacyRoot : await chooseFolder('选择包含 ArchiveFile 存档的目录，或 SaveHub 导出目录');
-    return directory ? store.importLegacy(id, directory) : null;
+    return directory ? store.prepareImport(id, directory) : null;
   });
+  register('executeImport', (planId, decisions) => store.executeImport(planId, decisions));
+  register('cancelImport', planId => store.cancelImport(planId));
   register('exportSnapshot', async (gameId, id) => {
     const directory = await chooseFolder('选择存档导出位置');
     return directory ? store.exportSnapshot(gameId, id, directory) : null;

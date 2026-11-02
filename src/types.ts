@@ -16,7 +16,11 @@ export interface Game extends GameInput {
 }
 export interface AppState { games: Game[]; theme: Theme; platform: Platform; dataDir: string; recoveryMessages: string[]; version: string }
 export interface Progress { phase: string; detail: string; completed: number; total?: number }
-export interface ImportReport { imported: string[]; skipped: string[]; failed: { name: string; error: string }[] }
+export type ImportAction = 'overwrite' | 'skip' | 'keep-both';
+export interface ImportDecision { itemId: string; action: ImportAction; targetId?: string }
+export interface ImportItem { id: string; name: string; source: string; bytes: number; fileCount: number; matches: Snapshot[] }
+export interface ImportPlan { id: string; gameId: string; directory: string; items: ImportItem[]; failed: { name: string; error: string }[] }
+export interface ImportReport { imported: string[]; overwritten: string[]; keptBoth: string[]; skipped: string[]; failed: { name: string; error: string }[] }
 export interface BatchReport { updated: string[]; failed: { id: string; label: string; error: string }[] }
 export interface ExportResult { folder: string; count: number }
 export interface Bridge {
@@ -32,7 +36,9 @@ export interface Bridge {
   updateSnapshots(gameId: string, ids: string[] | 'all', details: { deleted: boolean } | { protected: boolean }): Promise<BatchReport>;
   deleteSnapshots(gameId: string, ids: string[]): Promise<BatchReport>;
   verifySnapshot(gameId: string, id: string): Promise<{ fileCount: number; bytes: number }>;
-  importSnapshots(id: string, useLegacy?: boolean): Promise<ImportReport | null>;
+  importSnapshots(id: string, useLegacy?: boolean): Promise<ImportPlan | null>;
+  executeImport(planId: string, decisions: ImportDecision[]): Promise<ImportReport>;
+  cancelImport(planId: string): Promise<void>;
   exportSnapshot(gameId: string, id: string): Promise<string | null>;
   exportSnapshots(gameId: string, ids: string[] | 'all'): Promise<ExportResult | null>;
   openFolder(kind: 'vault' | 'game' | 'snapshots', id?: string): Promise<void>;

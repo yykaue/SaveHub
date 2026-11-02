@@ -193,6 +193,7 @@ export class SaveStore {
     this.onProgress = onProgress;
     this.fault = fault;
     this.busy = false;
+    this.pendingImport = null;
     this.recoveryMessages = [];
   }
 
@@ -209,6 +210,7 @@ export class SaveStore {
       await this.saveConfig();
     }
     await this.recoverTransactions();
+    await this.recoverImportReplacements();
     return this;
   }
 
@@ -339,11 +341,12 @@ export class SaveStore {
     });
   }
 
-  async capture(game, root, entries, { label, note = '', kind = 'manual', allowMissing = false, origin, favorite = false, protected: protectedTag = false } = {}) {
+  async capture(game, root, entries, { label, note = '', kind = 'manual', allowMissing = false, origin, favorite = false, protected: protectedTag = false, expectedFingerprint, replace } = {}) {
     if (typeof label !== 'string' || !label.trim() || label.length > 100) throw new Error('请填写 1–100 个字符的存档名称。');
     if (typeof note !== 'string' || note.length > 2000) throw new Error('存档备注不能超过 2,000 个字符。');
     await assertNoLinks(root);
     const source = await inventory(root, entries, { allowMissing, progress: this.onProgress });
+    if (expectedFingerprint && fingerprint(source) !== expectedFingerprint) throw new Error('导入源在确认后发生变化，请重新选择目录并检查。');
     const id = randomUUID();
     const stage = path.join(this.gameDir(game.id), 'snapshots', `.pending-${id}`);
     const destination = this.snapshotDir(game.id, id);
@@ -359,12 +362,17 @@ export class SaveStore {
         fileCount: source.records.filter(record => record.type === 'file').length,
         bytes: source.records.reduce((total, record) => total + (record.size || 0), 0),
         ...(origin ? { origin } : {}),
+        ...(replace ? { id: replace.id, createdAt: replace.createdAt, favorite: replace.favorite, protected: replace.protected } : {}),
       };
       validateManifest(meta);
       await atomicJson(path.join(stage, 'manifest.json'), meta);
-      await commitSnapshotDirectory(stage, destination);
+      if (replace) await this.replaceImportedSnapshot(game.id, replace, stage, id);
+      else await commitSnapshotDirectory(stage, destination);
       return meta;
-    } finally { await fs.rm(stage, { recursive: true, force: true }).catch(() => {}); }
+    } finally {
+      // A pending replacement journal owns its stage until rollback/recovery finishes.
+      if (!replace || !(await statMaybe(path.join(this.dataDir, 'import-transactions', `${id}.json`)))) await fs.rm(stage, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   async readSnapshot(gameId, id) {
@@ -603,60 +611,217 @@ export class SaveStore {
     }
   }
 
+  importReplacementPaths(journal) {
+    if (journal.version !== 1 || !['prepared', 'committed'].includes(journal.status)) throw new Error('导入覆盖事务无效。');
+    const token = safeId(journal.token), gameId = safeId(journal.gameId), id = safeId(journal.id);
+    const root = path.join(this.gameDir(gameId), 'snapshots');
+    return {
+      target: this.snapshotDir(gameId, id), stage: path.join(root, `.pending-${token}`), previous: path.join(root, `.replaced-${token}`),
+      file: path.join(this.dataDir, 'import-transactions', `${token}.json`),
+    };
+  }
+
+  async finishImportReplacement(journal) {
+    const { target, stage, previous, file } = this.importReplacementPaths(journal);
+    for (const location of [target, stage, previous, file]) await assertNoLinks(location);
+    if (journal.status === 'prepared' && await statMaybe(previous)) {
+      if (await statMaybe(target)) {
+        if (await statMaybe(stage)) throw new Error('覆盖恢复目录冲突，原存档仍保留在覆盖事务中。');
+        await commitSnapshotDirectory(target, stage);
+      }
+      await commitSnapshotDirectory(previous, target);
+    }
+    if (!(await statMaybe(target))) throw new Error('覆盖目标缺失，已保留事务文件供恢复。');
+    for (const directory of [stage, previous]) {
+      await assertTreeNoLinks(directory);
+      await fs.rm(directory, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 });
+    }
+    await fs.rm(file, { force: true });
+  }
+
+  async replaceImportedSnapshot(gameId, original, stage, token) {
+    const current = await this.readSnapshot(gameId, original.id);
+    if (!equal(current, original)) throw new Error('覆盖目标在复制期间发生变化，原记录已保留，请重新检查。');
+    if (current.protected || current.deletedAt || current.purgePending || current.kind === 'safety') throw new Error('当前记录不允许覆盖，请选择跳过或两者并存。');
+    const journal = { version: 1, token, gameId, id: original.id, status: 'prepared' };
+    const locations = this.importReplacementPaths(journal);
+    if (stage !== locations.stage) throw new Error('覆盖暂存目录无效。');
+    await assertTreeNoLinks(locations.target);
+    if (await statMaybe(locations.previous)) throw new Error('覆盖备份目录已存在。');
+    await this.fault('before-import-replace', { gameId, id: original.id });
+    await atomicJson(locations.file, journal);
+    try {
+      await commitSnapshotDirectory(locations.target, locations.previous);
+      await this.fault('after-import-backup', { gameId, id: original.id });
+      await commitSnapshotDirectory(stage, locations.target);
+      await this.fault('after-import-install', { gameId, id: original.id });
+      await atomicJson(locations.file, { ...journal, status: 'committed' });
+    } catch (error) {
+      try { await this.finishImportReplacement(journal); }
+      catch (rollbackError) { throw new Error(`导入覆盖失败，原文件已保留，重新打开应用将继续恢复：${error.message}；${rollbackError.message}`); }
+      throw new Error(`导入覆盖失败，原存档已还原：${error.message}`);
+    }
+    // Once committed, cleanup failure must not misreport the successful replacement.
+    // The persisted journal lets startup finish removing the previous copy.
+    await this.finishImportReplacement({ ...journal, status: 'committed' }).catch(() => {});
+  }
+
+  async recoverImportReplacements() {
+    const directory = path.join(this.dataDir, 'import-transactions');
+    await assertNoLinks(directory);
+    let files;
+    try { files = await fs.readdir(directory); } catch (error) { if (missing(error)) return; throw error; }
+    for (const name of files.filter(name => name.endsWith('.json'))) {
+      const file = path.join(directory, name);
+      await assertNoLinks(file);
+      const journal = JSON.parse(await fs.readFile(file, 'utf8'));
+      if (this.importReplacementPaths(journal).file !== file) throw new Error('导入覆盖事务身份不一致。');
+      await this.finishImportReplacement(journal);
+      if (journal.status === 'prepared') this.recoveryMessages.push('已还原上次意外中断的导入覆盖，原存档已保留。');
+    }
+  }
+
+  importMatches(candidate, snapshots) {
+    const key = value => this.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+    // An imported directory identifies a save even when its contents have changed.
+    // Equal contents in distinct source directories may be intentional checkpoints.
+    return snapshots.filter(snapshot => snapshot.origin?.path && key(snapshot.origin.path) === key(candidate.source));
+  }
+
+  async prepareImport(gameId, directory) {
+    return this.exclusive(async () => {
+      const plan = await this.prepareImportPlan(gameId, directory);
+      return structuredClone({ id: plan.id, gameId, directory, failed: plan.failed, items: plan.items.map(item => ({
+        id: item.id, name: item.name, source: item.source, bytes: item.bytes, fileCount: item.fileCount, matches: item.matches,
+      })) });
+    });
+  }
+
+  cancelImport(planId) {
+    if (this.pendingImport?.id === planId) this.pendingImport = null;
+  }
+
+  async prepareImportPlan(gameId, directory) {
+    this.pendingImport = null;
+    const game = this.game(gameId);
+    const entries = cleanItems(game.locations[this.platform]?.items || []);
+    if (typeof directory !== 'string' || !path.isAbsolute(directory)) throw new Error('请选择旧存档目录。');
+    directory = path.resolve(directory);
+    await assertNoLinks(directory);
+    if (within(this.dataDir, directory) || within(directory, this.dataDir)) throw new Error('不能从 SaveHub 资料库本身导入。');
+    const manifestFile = path.join(directory, 'manifest.json');
+    const collectionFile = path.join(directory, 'collection.json');
+    const plan = { id: randomUUID(), gameId, entries, directory, items: [], failed: [] };
+    const existing = await this.snapshots(gameId, true);
+    let candidates;
+    const namedExports = await this.namedExportCandidates(directory);
+    if (namedExports) {
+      candidates = namedExports;
+    } else if (await statMaybe(collectionFile)) {
+      await assertNoLinks(collectionFile);
+      const collection = JSON.parse(await fs.readFile(collectionFile, 'utf8'));
+      if (collection.version !== 1 || collection.type !== 'savehub-collection') throw new Error('批量导出清单格式无效。');
+      candidates = this.validateSelection(collection.snapshots).map(id => ({ name: id, id, exported: path.join(directory, `SaveHub-${id}`) }));
+    } else if (await statMaybe(manifestFile)) {
+      candidates = [{ name: path.basename(directory), exported: directory }];
+    } else {
+      const children = await fs.readdir(directory, { withFileTypes: true });
+      candidates = children.filter(item => item.isDirectory() && item.name.startsWith('ArchiveFile')).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true })).map(item => ({ name: item.name, source: path.join(directory, item.name) }));
+      if (!candidates.length) candidates = [{ name: path.basename(directory), source: directory }];
+    }
+    if (candidates.length > 10000) throw new Error('一次最多导入 10,000 份存档。');
+    for (const [index, candidate] of candidates.entries()) {
+      this.onProgress({ phase: 'checking', completed: index, total: candidates.length, detail: candidate.name });
+      try {
+        if (candidate.exported) {
+          const manifest = path.join(candidate.exported, 'manifest.json');
+          if (!candidate.meta) await assertNoLinks(manifest);
+          const meta = candidate.meta || validateManifest(JSON.parse(await fs.readFile(manifest, 'utf8')));
+          if (candidate.id && candidate.id !== meta.id) throw new Error('导出存档的身份与批量清单不一致。');
+          candidate.name = meta.label;
+          if (!equal([...meta.entries].sort(), [...entries].sort())) throw new Error('导出存档的相对路径与当前游戏配置不一致。');
+          candidate.source = candidate.meta ? candidate.exported : path.join(candidate.exported, 'payload');
+          candidate.allowMissing = meta.absent.length > 0;
+          candidate.meta = meta;
+          candidate.note = meta.note;
+          candidate.favorite = meta.favorite;
+          candidate.protected = meta.protected;
+        }
+        const data = await inventory(candidate.source, entries, { allowMissing: Boolean(candidate.allowMissing) });
+        if (candidate.meta && signature(data) !== signature(candidate.meta)) throw new Error('导出存档的完整性校验失败。');
+        plan.items.push({ ...candidate, id: randomUUID(), fingerprint: fingerprint(data),
+          bytes: data.records.reduce((total, record) => total + (record.size || 0), 0),
+          fileCount: data.records.filter(record => record.type === 'file').length,
+          matches: this.importMatches(candidate, existing),
+        });
+      } catch (error) { plan.failed.push({ name: candidate.name, error: error.message }); }
+    }
+    this.pendingImport = plan;
+    return plan;
+  }
+
+  async executeImport(planId, decisions) {
+    return this.exclusive(() => this.executeImportPlan(planId, decisions));
+  }
+
+  async executeImportPlan(planId, decisions) {
+    const plan = this.pendingImport;
+    if (!plan || plan.id !== planId) throw new Error('本次导入检查已失效，请重新选择目录。');
+    const game = this.game(plan.gameId);
+    if (!equal(cleanItems(game.locations[this.platform]?.items || []), plan.entries)) throw new Error('游戏配置已变化，请重新检查导入目录。');
+    const duplicates = plan.items.filter(item => item.matches.length);
+    if (!Array.isArray(decisions) || decisions.length !== duplicates.length) throw new Error('请为每份重复存档选择处理方式。');
+    const choices = new Map(), targets = new Set();
+    for (const decision of decisions) {
+      const item = duplicates.find(item => item.id === decision?.itemId);
+      if (!item || choices.has(item.id) || !['overwrite', 'skip', 'keep-both'].includes(decision.action)) throw new Error('重复存档的处理方式无效。');
+      if (decision.action === 'overwrite') {
+        const target = item.matches.find(snapshot => snapshot.id === decision.targetId);
+        if (!target || targets.has(target.id)) throw new Error('请选择唯一的覆盖目标，不能重复覆盖同一份记录。');
+        if (target.protected || target.deletedAt || target.purgePending || target.kind === 'safety') throw new Error('保护存档、回收站记录和读档恢复点不能被导入覆盖，请选择跳过或两者并存。');
+        targets.add(target.id);
+      }
+      choices.set(item.id, decision);
+    }
+    // Reject stale library decisions before committing any item in the batch.
+    const existing = await this.snapshots(game.id, true);
+    for (const item of plan.items) {
+      if (!equal(this.importMatches(item, existing), item.matches)) throw new Error('重复存档的状态已变化，请重新检查后选择处理方式。');
+    }
+    this.pendingImport = null; // An execution token is single use, including partial failure.
+    const report = { imported: [], overwritten: [], keptBoth: [], skipped: [], failed: [...plan.failed] };
+    const names = new Set([...existing.map(item => foldedName(item.label)), ...plan.items.map(item => foldedName(item.name.slice(0, 100)))]);
+    for (const [index, item] of plan.items.entries()) {
+      this.onProgress({ phase: 'importing', completed: index, total: plan.items.length, detail: item.name });
+      const choice = choices.get(item.id);
+      if (choice?.action === 'skip') { report.skipped.push(item.name); continue; }
+      try {
+        let label = item.name.slice(0, 100);
+        if (choice?.action === 'keep-both') {
+          let number = 2;
+          do { const suffix = ` (${number++})`; label = item.name.slice(0, 100 - suffix.length) + suffix; } while (names.has(foldedName(label)));
+        }
+        const replace = choice?.action === 'overwrite' ? await this.readSnapshot(game.id, choice.targetId) : undefined;
+        if (replace && !equal(publicSnapshot(replace), item.matches.find(target => target.id === replace.id))) throw new Error('覆盖目标已变化，请重新检查后再导入。');
+        await this.capture(game, item.source, plan.entries, { label, note: item.note || `导入自 ${item.source}`, kind: 'imported',
+          allowMissing: Boolean(item.allowMissing), origin: { path: item.source }, favorite: item.favorite, protected: item.protected,
+          expectedFingerprint: item.fingerprint, replace,
+        });
+        names.add(foldedName(label));
+        if (choice?.action === 'overwrite') report.overwritten.push(item.name);
+        else if (choice?.action === 'keep-both') report.keptBoth.push(label);
+        else report.imported.push(item.name);
+      } catch (error) { report.failed.push({ name: item.name, error: error.message }); }
+    }
+    return report;
+  }
+
+  // Non-interactive callers retain the conservative default of skipping duplicates.
+  // The desktop UI always uses prepareImport + explicit per-item decisions.
   async importLegacy(gameId, directory) {
     return this.exclusive(async () => {
-      const game = this.game(gameId);
-      const entries = cleanItems(game.locations[this.platform]?.items || []);
-      if (typeof directory !== 'string' || !path.isAbsolute(directory)) throw new Error('请选择旧存档目录。');
-      await assertNoLinks(directory);
-      if (within(this.dataDir, directory) || within(directory, this.dataDir)) throw new Error('不能从 SaveHub 资料库本身导入。');
-      const manifestFile = path.join(directory, 'manifest.json');
-      const collectionFile = path.join(directory, 'collection.json');
-      const report = { imported: [], skipped: [], failed: [] };
-      const existing = await this.snapshots(gameId, true);
-      let candidates;
-      const namedExports = await this.namedExportCandidates(directory);
-      if (namedExports) {
-        candidates = namedExports;
-      } else if (await statMaybe(collectionFile)) {
-        await assertNoLinks(collectionFile);
-        const collection = JSON.parse(await fs.readFile(collectionFile, 'utf8'));
-        if (collection.version !== 1 || collection.type !== 'savehub-collection') throw new Error('批量导出清单格式无效。');
-        const ids = this.validateSelection(collection.snapshots);
-        candidates = ids.map(id => ({ name: id, id, exported: path.join(directory, `SaveHub-${id}`) }));
-      } else if (await statMaybe(manifestFile)) {
-        candidates = [{ name: path.basename(directory), exported: directory }];
-      } else {
-        const children = await fs.readdir(directory, { withFileTypes: true });
-        candidates = children.filter(item => item.isDirectory() && item.name.startsWith('ArchiveFile')).map(item => ({ name: item.name, source: path.join(directory, item.name) }));
-        if (!candidates.length) candidates = [{ name: path.basename(directory), source: directory }];
-      }
-      for (const [index, candidate] of candidates.entries()) {
-        this.onProgress({ phase: 'importing', completed: index, total: candidates.length, detail: candidate.name });
-        try {
-          if (candidate.exported) {
-            const manifest = path.join(candidate.exported, 'manifest.json');
-            if (!candidate.meta) await assertNoLinks(manifest);
-            const meta = candidate.meta || validateManifest(JSON.parse(await fs.readFile(manifest, 'utf8')));
-            if (candidate.id && candidate.id !== meta.id) throw new Error('导出存档的身份与批量清单不一致。');
-            candidate.name = meta.label;
-            if (!equal([...meta.entries].sort(), [...entries].sort())) throw new Error('导出存档的相对路径与当前游戏配置不一致。');
-            candidate.source = candidate.meta ? candidate.exported : path.join(candidate.exported, 'payload');
-            const actual = await inventory(candidate.source, entries, { allowMissing: true });
-            if (signature(actual) !== signature(meta)) throw new Error('导出存档的完整性校验失败。');
-            candidate.allowMissing = meta.absent.length > 0;
-            candidate.note = meta.note;
-            candidate.favorite = meta.favorite;
-            candidate.protected = meta.protected;
-          }
-          const data = await inventory(candidate.source, entries, { allowMissing: Boolean(candidate.allowMissing) });
-          const digest = fingerprint(data);
-          if (existing.some(snapshot => snapshot.origin?.path === candidate.source && snapshot.fingerprint === digest)) { report.skipped.push(candidate.name); continue; }
-          const snapshot = await this.capture(game, candidate.source, entries, { label: candidate.name.slice(0, 100), note: candidate.note || `导入自 ${candidate.source}`, kind: 'imported', allowMissing: Boolean(candidate.allowMissing), origin: { path: candidate.source }, favorite: candidate.favorite, protected: candidate.protected });
-          report.imported.push(candidate.name); existing.push(publicSnapshot(snapshot));
-        } catch (error) { report.failed.push({ name: candidate.name, error: error.message }); }
-      }
-      return report;
+      const plan = await this.prepareImportPlan(gameId, directory);
+      return this.executeImportPlan(plan.id, plan.items.filter(item => item.matches.length).map(item => ({ itemId: item.id, action: 'skip' })));
     });
   }
 

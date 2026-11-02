@@ -18,6 +18,7 @@
     "test:ui": "node scripts/smoke.mjs",
     "test:interactions": "node scripts/interactions.mjs",
     "test:deletion": "node scripts/deletion-interactions.mjs",
+    "test:import": "node scripts/import-interactions.mjs",
     "test:portable": "node scripts/portable-smoke.mjs",
     "audit:release": "node scripts/audit-release.mjs",
     "build": "tsc --noEmit && vite build",

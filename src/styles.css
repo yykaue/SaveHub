@@ -346,12 +346,43 @@ input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(-
 .details-grid dt { color: var(--faint); }
 .details-grid dd { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .details-grid code { display: block; margin-bottom: 6px; font-size: 11px; }
-.import-summary { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); background: var(--surface); padding: 20px 0; border-radius: 7px; margin-bottom: 20px; }
+.import-summary { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--line); background: var(--surface); padding: 20px 0; border-radius: 7px; margin-bottom: 20px; }
 .import-summary > span { text-align: center; font-size: 10px; color: var(--muted); }
 .import-summary strong { display: block; font-size: 28px; font-weight: 400; color: var(--accent); margin-bottom: 7px; }
 .report-list { max-height: 220px; overflow: auto; margin-top: 20px; }
 .report-list p { display: flex; align-items: center; gap: 9px; padding: 7px 0; font-size: 11px; color: var(--muted); }
 .report-list svg { color: var(--accent); }
+.modal:has(.import-conflicts) .modal-body { display: flex; min-height: 0; overflow: hidden; }
+.import-conflicts, .import-conflicts > fieldset { display: flex; flex-direction: column; min-height: 0; width: 100%; }
+.import-conflicts > fieldset > :not(.import-conflict-list) { flex-shrink: 0; }
+.import-conflicts .dialog-description { margin-top: 0; margin-bottom: 10px; }
+.import-rules { display: grid; gap: 5px; margin: 15px 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.import-rules strong { display: inline-block; min-width: 62px; color: var(--text); font-weight: 500; }
+.import-bulk { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 17px 0 12px; }
+.import-bulk > span { color: var(--muted); font-size: 11px; margin-right: auto; }
+.import-bulk .button { padding: 7px 11px; font-size: 11px; }
+.import-conflict-list { display: grid; grid-auto-rows: max-content; gap: 12px; min-height: 100px; max-height: 40vh; flex: 1 1 auto; overflow-y: auto; padding: 3px 5px 5px 3px; }
+.import-conflict { padding: 16px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); min-width: 0; }
+.import-conflict-heading { display: flex; align-items: flex-start; gap: 12px; }
+.import-conflict-heading > span { color: var(--accent); font-size: 12px; padding-top: 1px; }
+.import-conflict h3 { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.import-conflict small { display: block; color: var(--muted); font-size: 10px; margin-top: 6px; }
+.import-source { color: var(--faint); font-size: 10px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; margin-top: 9px; }
+.import-existing { color: var(--muted); font-size: 11px; line-height: 1.8; margin-top: 11px; overflow-wrap: anywhere; }
+.import-target { display: grid; gap: 7px; color: var(--muted); font-size: 11px; margin-top: 12px; }
+.import-target select { min-width: 0; width: 100%; border: 1px solid var(--line-strong); border-radius: 5px; padding: 8px; background: var(--input-bg); color: var(--text); font-size: 11px; }
+.import-protected { display: flex; gap: 6px; align-items: center; color: var(--accent); font-size: 11px; margin-top: 10px; }
+.import-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 14px; }
+.import-options label { display: flex; justify-content: center; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 6px; color: var(--muted); font-size: 11px; cursor: pointer; }
+.import-options label.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.import-options label:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+.import-options input { accent-color: var(--accent); margin: 0; }
+.import-choice-summary { color: var(--muted); font-size: 11px; line-height: 1.8; padding-top: 18px; }
+.import-confirm-footer .dialog-actions { margin-top: 12px; padding-top: 16px; }
+.import-result-group { margin-top: 18px; }
+.import-result-group h3 { font-size: 12px; font-weight: 500; color: var(--text); }
+.import-result-group .report-list { margin-top: 5px; }
+.import-result-group .report-list span { overflow-wrap: anywhere; }
 .help-intro { display: flex; align-items: center; gap: 12px; color: var(--accent); margin: 5px 0 23px; }
 .help-intro p { font-family: var(--display-font); font-size: 15px; letter-spacing: .5px; }
 .help-steps { padding-left: 23px; }
