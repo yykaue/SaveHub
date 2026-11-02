@@ -19,7 +19,7 @@ async function walk(directory) {
     if (item.isDirectory()) await walk(file); else files.push(file.replaceAll(path.sep, '/'));
   }
 }
-await walk('electron'); await walk('dist'); files.push('build/icon.png');
+await walk('electron'); await walk('dist'); files.push('build/icon.png', 'build/icon.ico');
 const sourceMatches = [];
 for (const file of files) {
   const source = await fs.readFile(file);

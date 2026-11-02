@@ -235,8 +235,9 @@ try {
   await expect(rows).toHaveCount(3);
   await row(a.id).getByRole('checkbox').check();
   await row(protectedSave.id).getByRole('checkbox').check();
-  await expect(page.getByRole('button', { name: '所选保护', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /^所选(取消)?保护$/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^全部(取消)?保护$/ })).toHaveCount(0);
+  await page.screenshot({ path: path.join(screenshots, 'trash-toolbar.png'), animations: 'disabled' });
   await application.evaluate(({ dialog }, folder) => { globalThis.__pickerCalls = 0; dialog.showOpenDialog = async () => { globalThis.__pickerCalls++; return { canceled: false, filePaths: [folder] }; }; }, exportsDir);
   await page.getByRole('button', { name: '导出所选', exact: true }).click();
   await idle();

@@ -19,6 +19,7 @@
     "test:interactions": "node scripts/interactions.mjs",
     "test:deletion": "node scripts/deletion-interactions.mjs",
     "test:import": "node scripts/import-interactions.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
     "test:portable": "node scripts/portable-smoke.mjs",
     "audit:release": "node scripts/audit-release.mjs",
     "build": "tsc --noEmit && vite build",
@@ -45,11 +46,11 @@
     "productName": "SaveHub",
     "asar": true,
     "directories": { "output": "release/1.1.4" },
-    "files": ["dist/**/*", "electron/**/*", "build/icon.png", "package.json"],
+    "files": ["dist/**/*", "electron/**/*", "build/icon.png", "build/icon.ico", "package.json"],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "signAndEditExecutable": true,
       "signExecutable": false
     },

@@ -1,8 +1,9 @@
 import { Circle, Flame, Gamepad2, Gem, Ghost, Rocket, Swords, TowerControl } from 'lucide-react';
 import { useId } from 'react';
+import logoUrl from '../build/icon.svg';
 
 export function Logo({ small = false }: { small?: boolean }) {
-  return <svg width={small ? 27 : 35} height={small ? 27 : 35} viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="3" y="3" width="34" height="34" rx="11" fill="currentColor"/><path d="M12 14h16v13a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14Z" stroke="var(--logo-cutout, #fff)" strokeWidth="1.6"/><path d="M16 11v8h8v-8M17 25h6" stroke="var(--logo-cutout, #fff)" strokeWidth="1.6" strokeLinecap="round"/></svg>;
+  return <img className="savehub-logo" src={logoUrl} width={small ? 27 : 35} height={small ? 27 : 35} alt="" aria-hidden="true" draggable={false}/>;
 }
 
 export function GameGlyph({ icon, size = 23 }: { icon: string; size?: number }) {

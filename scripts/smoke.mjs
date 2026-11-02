@@ -49,6 +49,13 @@ try {
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
   assert.equal(await page.evaluate(() => typeof window.process), 'undefined');
   checks.push('Electron renderer loads with context isolation and no Node globals');
+  const appIcon = await application.evaluate(({ nativeImage }, filename) => {
+    const icon = nativeImage.createFromPath(filename);
+    return { empty: icon.isEmpty(), ...icon.getSize() };
+  }, path.resolve('build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'));
+  assert(!appIcon.empty && appIcon.width >= 16 && appIcon.height >= 16);
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', /.+/);
+  checks.push('Application icon decodes natively and the shared SaveHub logo is configured as the favicon');
 
   for (const theme of ['ink', 'tech', 'cyber', 'glass']) {
     const names = { ink: '水墨', tech: '科技', cyber: '赛博朋克', glass: '玻璃拟态' };
@@ -57,6 +64,9 @@ try {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     await expect(page.locator('.progress-panel')).toHaveCount(0);
     await page.getByRole('button', { name: '切换主题', exact: true }).click();
+    const brand = page.locator('.brand .savehub-logo');
+    await expect(brand).toBeVisible();
+    await expect.poll(() => brand.evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
     await page.mouse.move(800, 30);
     await page.screenshot({ path: path.join(screenshots, `${theme}.png`), animations: 'disabled' });
     checks.push(`${theme} theme renders and persists`);

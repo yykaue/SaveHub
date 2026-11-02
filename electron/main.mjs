@@ -42,7 +42,7 @@ function createWindow() {
   window = new BrowserWindow({
     width: 1440, height: 960, minWidth: 1060, minHeight: 720,
     title: 'SaveHub', backgroundColor: '#f6f5f0',
-    icon: path.join(project, 'build', 'icon.png'),
+    icon: path.join(project, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     show: false, titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#f6f5f000', symbolColor: '#75786d', height: 38 },
     trafficLightPosition: { x: 18, y: 13 },
