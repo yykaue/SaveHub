@@ -130,8 +130,12 @@ try {
   await dialog.getByTitle('浏览文件夹', { exact: true }).click();
   await expect(dialog.getByRole('textbox', { name: '游戏存档根目录', exact: true })).toHaveValue(presets[0].locations[process.platform].root);
   await dialog.getByRole('textbox', { name: /要备份的文件或目录/ }).fill('saves');
-  await dialog.getByRole('tab', { name: /macOS/ }).click();
-  await dialog.getByRole('textbox', { name: '游戏存档根目录', exact: true }).fill('/Users/example/Library/Application Support/Test');
+  const macOSTab = dialog.getByRole('tab', { name: /macOS/ });
+  await macOSTab.click();
+  await expect(macOSTab).toHaveAttribute('aria-selected', 'true');
+  const macOSRoot = dialog.getByRole('textbox', { name: '游戏存档根目录', exact: true });
+  await macOSRoot.fill('/Users/example/Library/Application Support/Test');
+  await expect(macOSRoot).toHaveValue('/Users/example/Library/Application Support/Test');
   await dialog.getByRole('textbox', { name: /要备份的文件或目录/ }).fill('saves');
   await dialog.getByRole('button', { name: '保存游戏', exact: true }).click();
   await expect(dialog).toHaveCount(0);
