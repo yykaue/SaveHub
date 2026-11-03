@@ -42,6 +42,21 @@ export async function purgeGameSnapshots(store, id) {
   await store.commitGame(next);
 }
 
+export async function purgeGame(store, id) {
+  const game = store.game(id, true);
+  if (!game.deletedAt || !game.purgeGamePending) throw new Error('游戏未确认彻底删除。');
+  const directory = path.resolve(store.gameDir(id));
+  if (path.dirname(directory) !== path.resolve(store.vault) || directory === path.resolve(store.vault) || !within(store.vault, directory)) throw new Error('游戏清理目录越界。');
+  await assertTreeNoLinks(directory);
+  const journals = await gameImportJournals(store, id);
+  await store.fault('before-game-purge-remove', { gameId: id, directory });
+  await fs.rm(directory, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 });
+  for (const file of journals) await fs.rm(file, { force: true });
+  await store.fault('before-game-config-delete', { gameId: id });
+  // Persist removal without writing game.json again into the deleted directory.
+  await store.forgetGame(id);
+}
+
 async function gameImportJournals(store, gameId) {
   const directory = path.join(store.dataDir, 'import-transactions');
   await assertNoLinks(directory);
@@ -61,18 +76,21 @@ async function gameImportJournals(store, gameId) {
 export async function removeGame(store, id, undo, deleteRecords) {
   if (typeof undo !== 'boolean' || typeof deleteRecords !== 'boolean' || (undo && deleteRecords)) throw new Error('游戏删除选项无效。');
   const game = store.game(id, true);
-  if (undo && game.purgeSnapshotsPending) throw new Error('此游戏的存档永久删除尚未完成，请先重试清理。');
-  if (game.purgeSnapshotsPending && !deleteRecords) throw new Error('此游戏的存档永久删除尚未完成，请重试清理。');
+  const pending = game.purgeGamePending || game.purgeSnapshotsPending;
+  if (undo && pending) throw new Error('此游戏的永久删除尚未完成，请先重试清理。');
+  if (pending && !deleteRecords) throw new Error('此游戏的永久删除尚未完成，请重试清理。');
+  if (deleteRecords && game.purgeGamePending) return purgeGame(store, id);
   const next = { ...game };
   if (undo) delete next.deletedAt;
   else next.deletedAt = next.deletedAt || new Date().toISOString();
   if (deleteRecords) {
     // Check links before committing intent; the journal flag makes partial removal retryable.
-    await assertTreeNoLinks(path.join(store.gameDir(id), 'snapshots'));
-    next.purgeSnapshotsPending = true;
+    await assertTreeNoLinks(store.gameDir(id));
+    next.purgeGamePending = true;
+    delete next.purgeSnapshotsPending;
   }
   await store.commitGame(next);
-  if (deleteRecords) await purgeGameSnapshots(store, id);
+  if (deleteRecords) await purgeGame(store, id);
 }
 
 export async function exportGames(store, ids, destination, includeSnapshots) {
@@ -219,7 +237,7 @@ export async function reviewGameImport(store, planId, decisions) {
     if (!item || choices.has(item.id) || !['overwrite', 'skip', 'keep-both'].includes(choice.action)) throw new Error('重复游戏的处理方式无效。');
     if (choice.action === 'overwrite') {
       const target = item.matches.find(game => game.id === choice.targetId);
-      if (!target || targets.has(target.id) || target.purgeSnapshotsPending) throw new Error('请选择唯一且已完成清理的游戏覆盖目标。');
+      if (!target || targets.has(target.id) || target.purgeGamePending || target.purgeSnapshotsPending) throw new Error('请选择唯一且已完成清理的游戏覆盖目标。');
       targets.add(target.id);
     }
     choices.set(item.id, structuredClone(choice));

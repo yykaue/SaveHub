@@ -202,6 +202,15 @@ select option { color: var(--text); background: var(--modal-bg); }
 .game-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
 .management-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 26px; }
 .management-actions > span { color: var(--muted); font-size: 12px; margin-left: auto; }
+.game-view-switch { display: flex; align-items: center; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-left: auto; }
+.game-view-switch button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; color: var(--muted); border-radius: 5px; font-size: 11px; }
+.game-view-switch button[aria-pressed=true] { color: var(--accent); background: var(--accent-soft); }
+.management-actions:has(.game-view-switch) > span { margin-left: 0; }
+.catalog-selection { position: absolute; top: 12px; left: 12px; display: grid; place-items: center; padding: 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; cursor: pointer; }
+.catalog-records { display: block; margin-top: 12px; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.game-card-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 12px; margin-top: 14px; border-top: 1px solid var(--line); }
+.game-card-body .game-card-actions .button { width: auto; margin-top: 0; }
+.all-games .quiet-empty { margin-top: 16px; }
 .management-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 15px; }
 .management-tabs { display: flex; gap: 8px; }
 .management-tabs button { padding: 9px 12px; border-radius: 6px; font-size: 12px; color: var(--muted); }

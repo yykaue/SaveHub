@@ -58,6 +58,7 @@ const done = message => { checks.push(message); console.log(`PASS ${message}`); 
 try {
   application = await electron.launch({ executablePath: process.env.SAVEHUB_TEST_EXECUTABLE || electronPath, args: process.env.SAVEHUB_TEST_EXECUTABLE ? [] : ['.'], env, timeout: 45000 });
   page = await application.firstWindow();
+  await page.getByRole('button', { name: /^存档库/ }).click();
   page.on('pageerror', error => errors.push(error.message));
   page.setDefaultTimeout(12000);
   const route = page.locator('.route-content');

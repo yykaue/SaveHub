@@ -15,11 +15,11 @@ Windows: Open `release/1.1.4/win-unpacked/SaveHub.exe`, or use the installer / p
 
 Preset games can be edited or removed, and you can add any custom game. Icons support built-in emblems as well as local PNG / JPG / WebP / ICO images. Imported images are copied into the configuration directory so they do not depend on the original file remaining in place.
 
-## Game Management
+## All Games
 
-The new **Game Management** sidebar page supports search, add, edit, delete, restore, import and single / selected / all game exports.
+**All Games** is the first workspace menu and default home, combining the former overview and management pages. Switch between the original card and list styles without losing search or selection; theme round trips preserve them too. The preferred style is remembered. Both views support add, edit, delete, restore, import and single / selected / all game exports.
 
-- Deleting a game retains its save records by default. **Permanently delete all save records for this game** physically removes every SaveHub record, including protected, favorite and trashed saves and restore points. Live game files are unaffected.
+- Deleting a game retains its settings and save records by default. **Permanently delete all save records for this game** physically removes the game settings, entire game vault directory and all records, including protected, favorite and trashed saves and restore points. The game disappears from the recoverable list. Live game files are unaffected.
 - Export defaults to game settings, including names, icons, colors and Windows / macOS paths. **Include save records** also exports all records with their original states, timestamps, notes and integrity information.
 - Import an entire game export bundle or an individual game folder. Duplicate identity or name matches offer per-item and bulk overwrite, skip and keep-both choices. Overwrite replaces settings while retaining existing saves; skipping a game also skips its bundled saves.
 - Bundled saves have a separate conflict review using the existing overwrite restrictions and replacement rollback. No game settings or saves are written until final confirmation. Canceling either step leaves the library unchanged. Check local paths after importing.
@@ -57,7 +57,7 @@ Within the same game, re-importing the same source directory is recognized as a 
 - Batch export prompts for a destination folder only once; **Export All** exports every record in the current tab regardless of search keywords. In the Favorites, Protected, and Recycle Bin tabs, it exports only the records belonging to that respective tab.
 - Automatically creates an independent **Restore Point** before every restore, using transactional replacement, failure rollback, and unfinished transaction recovery on next startup.
 - Restore Points support multi-select and select-all removal; Recycle Bin and Removed Restore Points support multi-select and select-all recovery or permanent deletion. Permanent deletion requires a second confirmation and physically removes files from disk permanently.
-- Removing a game from the library preserves all its backups, which can be restored anytime in Settings.
+- Default game deletion retains settings and backups for restoration from All Games → Deleted Games or Settings. Including saves permanently deletes the settings and entire game vault directory.
 - Four persistent visual themes: **Xuan Paper & Ink**, **Crystal Tech**, **Neon Cyberpunk**, and **Frosted Glass**. The top-right theme button is the unified entry point; clicking it again returns to your previous page while preserving the active game, filter tab, search query, sort order, selection, and scroll position.
 - Bilingual interface switching between **Simplified Chinese (`简体中文`)** and **English**, defaulting to Chinese; switchable anytime from the top-right toolbar button or in **Settings & About**, persisted across launches.
 - Smooth transitions across route changes, filters, sorting, themes, and modals, respecting the OS `prefers-reduced-motion` setting.

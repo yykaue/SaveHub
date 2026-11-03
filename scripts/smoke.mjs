@@ -43,6 +43,7 @@ const checks = [];
 try {
   application = await electron.launch({ executablePath: process.env.SAVEHUB_TEST_EXECUTABLE || electronPath, args: process.env.SAVEHUB_TEST_EXECUTABLE ? [] : ['.'], env, timeout: 45000 });
   const page = await application.firstWindow();
+  await page.getByRole('button', { name: /^存档库/ }).click();
   page.on('pageerror', error => errors.push(error.message));
   await page.waitForSelector('.snapshot-row');
   await expect(page.getByRole('heading', { name: '艾尔登法环', exact: true })).toBeVisible();
@@ -140,9 +141,10 @@ try {
   await dialog.getByRole('button', { name: '保存游戏', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '自动化测试游戏', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /自动化测试游戏 0 份存档/ }).click();
   await page.getByRole('button', { name: '游戏设置', exact: true }).click();
-  await dialog.getByRole('button', { name: '移除游戏', exact: true }).click();
-  await dialog.getByRole('button', { name: '移除游戏', exact: true }).click();
+  await dialog.getByRole('button', { name: '删除游戏', exact: true }).click();
+  await dialog.getByRole('button', { name: '删除游戏', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await page.getByRole('button', { name: '设置与关于', exact: true }).click();
   await page.getByRole('button', { name: '找回项目', exact: true }).click();

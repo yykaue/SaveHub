@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_LANGUAGE, LANGUAGES, normalizeLanguage, translate } from './i18n.mjs';
-import { normalizeGame, removeGame, purgeGameSnapshots, exportGames, prepareGameImport, reviewGameImport, executeGameImport } from './game-transfer.mjs';
+import { normalizeGame, removeGame, purgeGame, purgeGameSnapshots, exportGames, prepareGameImport, reviewGameImport, executeGameImport } from './game-transfer.mjs';
 
 export { LANGUAGES };
 export const THEMES = ['ink', 'tech', 'cyber', 'glass'];
@@ -217,9 +217,10 @@ export class SaveStore {
       await this.saveConfig();
     }
     await this.recoverTransactions();
-    for (const game of this.config.games.filter(game => game.purgeSnapshotsPending)) {
-      try { await purgeGameSnapshots(this, game.id); }
-      catch (error) { this.recoveryMessages.push(`游戏存档清理未完成，请在游戏管理中重试：${game.name}（${error.message}）`); }
+    for (const game of this.config.games.filter(game => game.purgeGamePending || game.purgeSnapshotsPending)) {
+      // Older snapshot-only cleanup intents retain their original scope.
+      try { await (game.purgeGamePending ? purgeGame(this, game.id) : purgeGameSnapshots(this, game.id)); }
+      catch (error) { this.recoveryMessages.push(`游戏清理未完成，请在全部游戏中重试：${game.name}（${error.message}）`); }
     }
     await this.recoverImportReplacements();
     return this;
@@ -316,6 +317,13 @@ export class SaveStore {
     try { await this.saveConfig(); } catch (error) { this.config = previous; throw error; }
     // library.json is authoritative; a failed cache write cannot undo a committed game.
     await atomicJson(path.join(this.gameDir(game.id), 'game.json'), game).catch(() => {});
+  }
+
+  async forgetGame(id) {
+    safeId(id);
+    const previous = this.config;
+    this.config = { ...previous, games: previous.games.filter(game => game.id !== id) };
+    try { await this.saveConfig(); } catch (error) { this.config = previous; throw error; }
   }
 
   async removeGame(id, undo = false, deleteRecords = false) {
@@ -704,7 +712,7 @@ export class SaveStore {
       const journal = JSON.parse(await fs.readFile(file, 'utf8'));
       if (this.importReplacementPaths(journal).file !== file) throw new Error('导入覆盖事务身份不一致。');
       // Explicit game cleanup owns these payloads; never resurrect them on restart.
-      if (this.config.games.some(game => game.id === journal.gameId && game.purgeSnapshotsPending)) continue;
+      if (this.config.games.some(game => game.id === journal.gameId && (game.purgeGamePending || game.purgeSnapshotsPending))) continue;
       await this.finishImportReplacement(journal);
       if (journal.status === 'prepared') this.recoveryMessages.push('已还原上次意外中断的导入覆盖，原存档已保留。');
     }

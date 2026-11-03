@@ -48,6 +48,7 @@ const done = message => { checks.push(message); console.log(`PASS ${message}`); 
 try {
   application = await electron.launch({ executablePath: process.env.SAVEHUB_TEST_EXECUTABLE || electronPath, args: process.env.SAVEHUB_TEST_EXECUTABLE ? [] : ['.'], env, timeout: 45000 });
   page = await application.firstWindow();
+  await page.getByRole('button', { name: /^存档库/ }).click();
   page.setDefaultTimeout(15000);
   page.on('pageerror', error => errors.push(error.message));
   const dialog = page.getByRole('dialog');
@@ -153,7 +154,9 @@ try {
 
   // Reproduce an older version's protected trash record without bypassing the new API guard.
   await atomicJson(path.join(store.snapshotDir(gameId, kept.id), 'manifest.json'), { ...await store.readSnapshot(gameId, kept.id), deletedAt: new Date().toISOString() });
-  await page.reload(); await tab('回收站'); await expect(rows).toHaveCount(1);
+  await page.reload();
+  await page.getByRole('button', { name: /^存档库/ }).click();
+  await tab('回收站'); await expect(rows).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^全部(取消)?保护$/ })).toHaveCount(0);
   await all.check(); await expect(page.getByRole('button', { name: '永久删除所选', exact: true })).toBeDisabled();
   await row(kept.id).getByRole('button', { name: /更多操作$/ }).click();

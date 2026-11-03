@@ -47,15 +47,34 @@ try {
   const dialog = page.getByRole('dialog');
   const idle = () => expect(page.locator('.progress-panel')).toHaveCount(0);
   const pick = directory => application.evaluate((_, value) => { globalThis.__gameDirectory = value; }, directory);
-  const management = () => page.getByRole('button', { name: '游戏管理', exact: true });
-  const row = id => page.locator(`.management-game[data-game-id="${id}"]`);
-  await management().click();
+  const management = () => page.getByRole('button', { name: '全部游戏', exact: true });
+  const row = id => page.locator(`.catalog-game[data-game-id="${id}"]`);
+  const navigation = page.getByRole('navigation', { name: '主导航', exact: true });
+  await expect(navigation.getByRole('button').first()).toHaveAccessibleName('全部游戏');
+  await expect(navigation.getByRole('button', { name: '游戏管理', exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-page="games"]')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '全部游戏', exact: true })).toBeVisible();
+  await expect(page.locator('.all-games')).toHaveAttribute('data-layout', 'cards');
+  await expect(page.locator('.game-card.catalog-game')).toHaveCount(3);
+  await page.getByRole('button', { name: '列表视图', exact: true }).click();
   await expect(page.locator('.management-game')).toHaveCount(3);
+  done('All Games is the default home and first workspace menu; the duplicate management menu is gone and both original presentation styles are available');
+  await expect(page.locator('.catalog-game')).toHaveCount(3);
   await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('雪原');
-  await expect(page.locator('.management-game')).toHaveCount(1);
+  await expect(page.locator('.catalog-game')).toHaveCount(1);
   await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('');
   await page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true }).check();
   await page.getByRole('checkbox', { name: '选择游戏 星际漫游', exact: true }).check();
+  await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('雪原');
+  await page.getByRole('button', { name: '卡片视图', exact: true }).click();
+  await expect(page.locator('.game-card.catalog-game')).toHaveCount(1);
+  await expect(page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true })).toBeChecked();
+  await expect(page.getByRole('textbox', { name: '搜索游戏名称或副标题' })).toHaveValue('雪原');
+  await page.getByRole('button', { name: '列表视图', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true })).toBeChecked();
+  await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('');
+  await page.getByRole('button', { name: '卡片视图', exact: true }).click();
+  done('Card/list switching preserves search and cross-view selection while exposing the same edit, import, export and delete actions');
   await page.getByRole('button', { name: '导出所选', exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: '一并导出存档记录' })).not.toBeChecked();
   await expect(dialog.locator('.batch-confirm-list li')).toHaveCount(2);
@@ -66,7 +85,7 @@ try {
   await row(gameId).getByRole('button', { name: '编辑游戏 雪原之旅' }).click();
   await dialog.getByRole('textbox', { name: '副标题' }).fill('LOCAL CONFIGURATION');
   await dialog.getByRole('button', { name: '保存游戏', exact: true }).click(); await idle();
-  await expect(page.locator('[data-page="management"]')).toBeVisible();
+  await expect(page.locator('[data-page="games"]')).toBeVisible();
   assert.equal((await diskGames()).find(game => game.id === gameId).subtitle, 'LOCAL CONFIGURATION');
   done('Editing a game from management saves settings and stays on the management page');
 
@@ -154,42 +173,61 @@ try {
 
   await row(gameId).getByRole('button', { name: '删除游戏 雪原之旅', exact: true }).click();
   await dialog.getByRole('checkbox', { name: '一并永久删除该游戏的全部存档记录' }).check();
-  await expect(dialog).toContainText('物理删除 5 份记录');
+  await expect(dialog).toContainText('整个游戏资料库目录及 5 份记录');
+  await expect(dialog).toContainText('物理删除游戏配置');
   await expect(dialog).toContainText('受保护');
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal((await store.snapshots(gameId, true)).length, 5);
   await row(gameId).getByRole('button', { name: '删除游戏 雪原之旅', exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: '一并永久删除该游戏的全部存档记录' })).not.toBeChecked();
   await dialog.getByRole('checkbox', { name: '一并永久删除该游戏的全部存档记录' }).check();
-  await dialog.getByRole('button', { name: '删除游戏并永久删除存档', exact: true }).click(); await idle();
-  await assert.rejects(fs.stat(path.join(store.gameDir(gameId), 'snapshots')), { code: 'ENOENT' });
+  await dialog.getByRole('button', { name: '彻底删除游戏及存档', exact: true }).click(); await idle();
+  await assert.rejects(fs.stat(store.gameDir(gameId)), { code: 'ENOENT' });
+  assert(!(await diskGames()).some(game => game.id === gameId));
+  assert(!(await page.evaluate(() => window.savehub.state())).games.some(game => game.id === gameId));
   assert.equal((await store.snapshots(copy.id, true)).length, 4);
   await page.getByRole('button', { name: '已删除游戏', exact: false }).click();
-  await row(gameId).getByRole('button', { name: '找回游戏' }).click(); await idle();
-  assert.equal((await store.snapshots(gameId, true)).length, 0);
+  await expect(row(gameId)).toHaveCount(0);
+  await expect(page.locator('.quiet-empty')).toContainText('没有符合条件的游戏');
   await page.getByRole('button', { name: '当前游戏', exact: false }).click();
-  done('Explicit permanent-delete checkbox removes protected and other records physically; cancel and default remain safe; other games retain their records');
+  done('Explicit permanent deletion removes settings from memory and disk and the entire game vault directory; the game cannot be recovered and other games retain their records');
 
   const themes = { ink: '水墨', tech: '科技', cyber: '赛博朋克', glass: '玻璃拟态' };
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 960));
   if (await page.locator('.toast').count()) await page.locator('.toast button').click();
-  await page.screenshot({ path: path.join(screenshots, 'game-management-overview.png'), animations: 'disabled' });
+  for (const [layout, label] of [['cards', '卡片视图'], ['list', '列表视图']]) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await expect(page.locator('.all-games')).toHaveAttribute('data-layout', layout);
+    await page.screenshot({ path: path.join(screenshots, 'all-games-' + layout + '.png'), animations: 'disabled' });
+  }
+  await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('雪原之旅 (2)');
+  await page.getByRole('checkbox', { name: '选择游戏 雪原之旅 (2)', exact: true }).check();
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1060, 720));
   for (const [theme, name] of Object.entries(themes)) {
-    await page.getByRole('button', { name: '切换主题', exact: true }).click();
-    await page.getByRole('button', { name: `切换${name}主题`, exact: true }).click(); await idle();
-    await page.getByRole('button', { name: '切换主题', exact: true }).click();
-    await expect(page.locator('[data-page="management"]')).toBeVisible();
-    await page.screenshot({ path: path.join(screenshots, `game-management-${theme}.png`), animations: 'disabled' });
-    const overflows = await page.locator('.management-game').evaluateAll(rows => rows.filter(row => row.scrollWidth > row.clientWidth + 1).length);
-    assert.equal(overflows, 0);
+    for (const [layout, label] of [['cards', '卡片视图'], ['list', '列表视图']]) {
+      await page.getByRole('button', { name: label, exact: true }).click();
+      await page.getByRole('button', { name: '切换主题', exact: true }).click();
+      await page.getByRole('button', { name: '切换' + name + '主题', exact: true }).click(); await idle();
+      await page.getByRole('button', { name: '切换主题', exact: true }).click();
+      await expect(page.locator('[data-page="games"]')).toBeVisible();
+      await expect(page.locator('.all-games')).toHaveAttribute('data-layout', layout);
+      await expect(page.getByRole('textbox', { name: '搜索游戏名称或副标题' })).toHaveValue('雪原之旅 (2)');
+      await expect(page.getByRole('checkbox', { name: '选择游戏 雪原之旅 (2)', exact: true })).toBeChecked();
+      await page.screenshot({ path: path.join(screenshots, 'all-games-' + theme + '-' + layout + '.png'), animations: 'disabled' });
+      assert.equal(await page.locator('.catalog-game').evaluateAll(rows => rows.filter(row => row.scrollWidth > row.clientWidth + 1).length), 0);
+    }
   }
   await page.getByRole('button', { name: '切换语言', exact: true }).click(); await idle();
-  await expect(page.getByRole('button', { name: 'Game Management', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'All Games', exact: true })).toBeVisible();
   await row(copy.id).getByRole('button', { name: 'Export game 雪原之旅 (2)', exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: 'Include save records', exact: true })).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-  done('All four themes render at 1060×720 without row overflow; management and transfer dialogs support English');
+  await page.reload();
+  await expect(page.locator('[data-page="games"]')).toBeVisible();
+  await expect(page.locator('.all-games')).toHaveAttribute('data-layout', 'list');
+  await expect(page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('button').first()).toHaveAccessibleName('All Games');
+  assert(!(await diskGames()).some(game => game.id === gameId));
+  done('Both styles preserve search and selection through all four themes at 1060×720; English works and the view preference survives reload');
 
   assert.equal(await fs.readFile(path.join(source, 'saves', 'progress.dat'), 'utf8'), 'live-untouched');
   assert.deepEqual(errors, []);

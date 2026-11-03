@@ -12,7 +12,7 @@ export interface GameInput {
   locations: Record<Platform, Location>; legacyRoot: string;
 }
 export interface Game extends GameInput {
-  id: string; createdAt: string; deletedAt?: string; purgeSnapshotsPending?: boolean; snapshots: Snapshot[]; restorePoints: Snapshot[];
+  id: string; createdAt: string; deletedAt?: string; purgeGamePending?: boolean; purgeSnapshotsPending?: boolean; snapshots: Snapshot[]; restorePoints: Snapshot[];
   pathStatus: 'ready' | 'unconfigured' | 'missing'; legacyCount: number;
 }
 export interface AppState { games: Game[]; theme: Theme; language: Language; platform: Platform; dataDir: string; recoveryMessages: string[]; version: string }
@@ -24,7 +24,7 @@ export interface ImportPlan { id: string; gameId: string; directory: string; ite
 export interface ImportReport { imported: string[]; overwritten: string[]; keptBoth: string[]; skipped: string[]; failed: { name: string; error: string }[] }
 export interface BatchReport { updated: string[]; failed: { id: string; label: string; error: string }[] }
 export interface ExportResult { folder: string; count: number }
-export interface GameImportItem { id: string; game: GameInput & { id: string; createdAt: string }; source: string; includesSnapshots: boolean; matches: (GameInput & { id: string; createdAt: string; deletedAt?: string; purgeSnapshotsPending?: boolean })[] }
+export interface GameImportItem { id: string; game: GameInput & { id: string; createdAt: string }; source: string; includesSnapshots: boolean; matches: (GameInput & { id: string; createdAt: string; deletedAt?: string; purgeGamePending?: boolean; purgeSnapshotsPending?: boolean })[] }
 export interface GameImportPlan { id: string; directory: string; items: GameImportItem[]; failed: { name: string; error: string }[] }
 export interface GameImportReview { id: string; planId: string; failed: { name: string; error: string }[]; games: { itemId: string; name: string; action: ImportAction | 'import'; snapshots: ImportPlan | null }[] }
 export interface GameSnapshotDecision { itemId: string; decisions: ImportDecision[] }

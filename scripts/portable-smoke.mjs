@@ -67,6 +67,7 @@ try {
   assert.equal(await page.evaluate(() => typeof window.process), 'undefined');
   checks.push('Packaged renderer has no Node globals');
 
+  await page.getByRole('button', { name: /^存档库/ }).click();
   await page.getByRole('button', { name: '创建新存档', exact: true }).click();
   const label = `便携版验证 · ${Date.now()}`;
   const dialog = page.getByRole('dialog');

@@ -54,29 +54,35 @@ test('game deletion defaults to retaining every record, identity and flag throug
   for (const save of before) assert.equal(await read(f.payload(resumed, f.id, save)), 'original-progress');
 });
 
-test('explicit game purge physically removes protected, favorite, trashed, safety and corrupt records only for this game', async t => {
+test('explicit game purge physically removes the entire game directory and configuration, including protected and corrupt records', async t => {
   const f = await fixture(t); await marks(f);
   const other = await f.store.upsertGame({ ...f.input, name: '另一个游戏' });
   const otherSave = await f.store.createSnapshot(other, { label: '保留', note: '' });
   await fs.mkdir(path.join(f.store.gameDir(f.id), 'snapshots', 'broken')); await fs.writeFile(path.join(f.store.gameDir(f.id), 'snapshots', 'broken', 'unknown'), 'corrupt');
+  await fs.mkdir(path.join(f.store.gameDir(f.id), 'extra-configuration'));
+  await fs.writeFile(path.join(f.store.gameDir(f.id), 'extra-configuration', 'notes.json'), '{}');
   await f.store.removeGame(f.id, false, true);
-  await assert.rejects(fs.stat(path.join(f.store.gameDir(f.id), 'snapshots')), { code: 'ENOENT' });
-  assert(f.store.game(f.id, true).deletedAt); assert(!f.store.game(f.id, true).purgeSnapshotsPending);
+  await assert.rejects(fs.stat(f.store.gameDir(f.id)), { code: 'ENOENT' });
+  assert(!f.store.config.games.some(game => game.id === f.id));
+  assert(!JSON.parse(await read(f.store.configFile)).games.some(game => game.id === f.id));
   await f.store.verify(other, otherSave.id);
   assert.equal(await read(path.join(f.source, 'saves', 'progress.dat')), 'original-progress');
-  await f.store.removeGame(f.id, true);
-  assert.deepEqual(await f.store.snapshots(f.id, true), []);
+  await assert.rejects(f.store.removeGame(f.id, true), /找不到/);
+  const resumed = await new SaveStore(f.store.dataDir).init();
+  assert(!resumed.config.games.some(game => game.id === f.id));
+  await assert.rejects(fs.stat(resumed.gameDir(f.id)), { code: 'ENOENT' });
 });
 
 test('interrupted game purge remains retry-only and startup resumes committed cleanup intent', async t => {
   const f = await fixture(t); const first = await f.add('第一份'), second = await f.add('第二份');
   f.store.fault = async phase => { if (phase === 'before-game-purge-remove') { await fs.rm(f.payload(f.store, f.id, first)); throw new Error('simulated interruption'); } };
   await assert.rejects(f.store.removeGame(f.id, false, true), /simulated interruption/);
-  assert(f.store.game(f.id, true).purgeSnapshotsPending);
+  assert(f.store.game(f.id, true).purgeGamePending);
   await assert.rejects(f.store.removeGame(f.id, true), /尚未完成/);
   assert.equal(await read(f.payload(f.store, f.id, second)), 'original-progress');
   const resumed = await new SaveStore(f.store.dataDir).init();
-  assert(!resumed.game(f.id, true).purgeSnapshotsPending);
+  assert(!resumed.config.games.some(game => game.id === f.id));
+  await assert.rejects(fs.stat(resumed.gameDir(f.id)), { code: 'ENOENT' });
   assert.deepEqual(await resumed.snapshots(f.id, true), []);
 });
 
@@ -301,7 +307,8 @@ test('game purge removes deferred replacement journals so restart never resurrec
   assert.deepEqual(await fs.readdir(path.join(f.store.dataDir, 'import-transactions')), []);
   const resumed = await new SaveStore(f.store.dataDir).init();
   assert.deepEqual(await resumed.snapshots(f.id, true), []);
-  assert(resumed.game(f.id, true).deletedAt);
+  assert(!resumed.config.games.some(game => game.id === f.id));
+  await assert.rejects(fs.stat(resumed.gameDir(f.id)), { code: 'ENOENT' });
 });
 
 test('an interrupted whole-game purge takes precedence over import rollback even if cleanup fails again at startup', async t => {
@@ -309,13 +316,45 @@ test('an interrupted whole-game purge takes precedence over import rollback even
   f.store.fault = async (phase, { directory }) => { if (phase === 'before-game-purge-remove') { await fs.rm(directory, { recursive: true, force: true }); throw new Error('interrupted after removal'); } };
   await assert.rejects(f.store.removeGame(f.id, false, true), /interrupted/);
   const resumed = await new SaveStore(f.store.dataDir, { fault: async phase => { if (phase === 'before-game-purge-remove') throw new Error('still locked'); } }).init();
-  assert(resumed.game(f.id, true).purgeSnapshotsPending);
+  assert(resumed.game(f.id, true).purgeGamePending);
   assert.equal(resumed.recoveryMessages.length, 1);
   assert.deepEqual(await resumed.snapshots(f.id, true), []);
+  resumed.commitGame = async () => { throw new Error('Retry must not recreate the game cache directory'); };
   resumed.fault = async () => {};
   await resumed.removeGame(f.id, false, true);
   assert.deepEqual(await fs.readdir(path.join(f.store.dataDir, 'import-transactions')), []);
   await new SaveStore(f.store.dataDir).init();
+});
+
+test('a failed final config commit leaves durable whole-game deletion intent and restart removes it without recreating the directory', async t => {
+  const f = await fixture(t); await f.add('删除');
+  const saveConfig = f.store.saveConfig.bind(f.store);
+  f.store.saveConfig = async () => {
+    if (!f.store.config.games.some(game => game.id === f.id)) throw new Error('config locked');
+    return saveConfig();
+  };
+  await assert.rejects(f.store.removeGame(f.id, false, true), /config locked/);
+  assert(f.store.game(f.id, true).purgeGamePending);
+  assert(JSON.parse(await read(f.store.configFile)).games.some(game => game.id === f.id && game.purgeGamePending));
+  await assert.rejects(fs.stat(f.store.gameDir(f.id)), { code: 'ENOENT' });
+  const resumed = await new SaveStore(f.store.dataDir).init([f.store.game(f.id, true)]);
+  assert.deepEqual(resumed.config.games, []);
+  assert.deepEqual((await resumed.state()).games, []);
+  await assert.rejects(fs.stat(resumed.gameDir(f.id)), { code: 'ENOENT' });
+  await assert.rejects(resumed.removeGame(f.id, true), /找不到/);
+});
+
+test('older snapshot-only cleanup intents retain their original scope during startup recovery', async t => {
+  const f = await fixture(t); await f.add('旧清理');
+  const game = { ...f.store.game(f.id), deletedAt: new Date().toISOString(), purgeSnapshotsPending: true };
+  await f.store.commitGame(game);
+  const resumed = await new SaveStore(f.store.dataDir).init();
+  assert(resumed.game(f.id, true).deletedAt);
+  assert(!resumed.game(f.id, true).purgeSnapshotsPending);
+  assert((await fs.stat(path.join(resumed.gameDir(f.id), 'game.json'))).isFile());
+  assert.deepEqual(await resumed.snapshots(f.id, true), []);
+  await resumed.removeGame(f.id, true);
+  assert.equal(resumed.game(f.id).name, f.input.name);
 });
 
 test('a game named games.json round-trips and concurrent metadata publication keeps the existing file intact', async t => {
