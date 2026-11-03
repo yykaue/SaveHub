@@ -19,6 +19,7 @@
     "test:interactions": "node scripts/interactions.mjs",
     "test:deletion": "node scripts/deletion-interactions.mjs",
     "test:import": "node scripts/import-interactions.mjs",
+    "test:games": "node scripts/game-interactions.mjs",
     "build:icons": "node scripts/build-icons.mjs",
     "test:portable": "node scripts/portable-smoke.mjs",
     "audit:release": "node scripts/audit-release.mjs",

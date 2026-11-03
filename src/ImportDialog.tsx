@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, Copy, Info, ShieldCheck } from 'lucide-react';
 import { formatBytes, fullDate } from './format';
 import { t } from './i18n';
@@ -8,8 +8,8 @@ const canOverwrite = (snapshot: Snapshot) => !snapshot.protected && !snapshot.de
 const initialTarget = (item: ImportItem) => item.matches.find(canOverwrite) || item.matches[0];
 const targetDescription = (snapshot: Snapshot) => `${snapshot.label} · ${fullDate(snapshot.createdAt)} · ${formatBytes(snapshot.bytes)}${snapshot.protected ? t('import.tagProtected') : ''}${snapshot.deletedAt ? t('import.tagTrash') : ''}${snapshot.kind === 'safety' ? t('import.tagRestorePoint') : ''}${snapshot.purgePending ? t('import.tagPurgePending') : ''}`;
 
-export function ImportConflicts({ plan, busy, onCancel, onConfirm }: {
-  plan: ImportPlan; busy: boolean; onCancel: () => void; onConfirm: (decisions: ImportDecision[]) => void;
+export function ImportConflicts({ plan, busy, onCancel, onConfirm, intro, confirmLabel }: {
+  plan: ImportPlan; busy: boolean; onCancel: () => void; onConfirm: (decisions: ImportDecision[]) => void; intro?: ReactNode; confirmLabel?: string;
 }) {
   const actions: { value: ImportAction; label: string }[] = [
     { value: 'overwrite', label: t('import.actionOverwrite') }, { value: 'skip', label: t('import.actionSkip') }, { value: 'keep-both', label: t('import.actionKeepBoth') },
@@ -26,8 +26,8 @@ export function ImportConflicts({ plan, busy, onCancel, onConfirm }: {
   const count = (action: ImportAction) => Object.values(choices).filter(choice => choice.action === action).length;
   return <form className="import-conflicts" onSubmit={event => { event.preventDefault(); if (!busy) onConfirm(duplicates.map(item => choices[item.id])); }}>
     <fieldset disabled={busy}>
-      <p className="dialog-description">{t('import.foundDuplicates', { count: duplicates.length })}</p>
-      <p className="muted">{t('import.chooseHowToHandle')}{newCount > 0 && t('import.additionalNewSaves', { count: newCount })}</p>
+      {intro || <><p className="dialog-description">{t('import.foundDuplicates', { count: duplicates.length })}</p>
+      <p className="muted">{t('import.chooseHowToHandle')}{newCount > 0 && t('import.additionalNewSaves', { count: newCount })}</p></>}
       <div className="import-rules"><p><strong>{t('import.actionOverwrite')}</strong><span>{t('import.ruleOverwriteDesc')}</span></p><p><strong>{t('import.actionSkip')}</strong><span>{t('import.ruleSkipDesc')}</span></p><p><strong>{t('import.actionKeepBoth')}</strong><span>{t('import.ruleKeepBothDesc')}</span></p></div>
       <div className="import-bulk" aria-label={t('import.bulkAria')}>
         <span>{t('import.bulkLabel')}</span>
@@ -59,13 +59,13 @@ export function ImportConflicts({ plan, busy, onCancel, onConfirm }: {
       </div>
       <div className="import-confirm-footer">
         <p className="import-choice-summary" role="status">{t('import.choiceSummary', { newCount, overwriteCount: count('overwrite'), skipCount: count('skip'), keepBothCount: count('keep-both') })}</p>
-        <div className="dialog-actions"><button type="button" className="button secondary" onClick={onCancel}>{t('import.cancelBtn')}</button><button type="submit" className="button primary"><Check size={15}/>{t('import.executeImportBtn')}</button></div>
+        <div className="dialog-actions"><button type="button" className="button secondary" onClick={onCancel}>{t('import.cancelBtn')}</button><button type="submit" className="button primary"><Check size={15}/>{confirmLabel || t('import.executeImportBtn')}</button></div>
       </div>
     </fieldset>
   </form>;
 }
 
-export function ImportResult({ report, onClose }: { report: ImportReport; onClose: () => void }) {
+export function ImportResult({ report, onClose, description }: { report: ImportReport; onClose?: () => void; description?: string }) {
   const groups = [
     { key: 'imported', name: t('import.resultImported'), items: report.imported },
     { key: 'overwritten', name: t('import.resultOverwritten'), items: report.overwritten },
@@ -73,8 +73,8 @@ export function ImportResult({ report, onClose }: { report: ImportReport; onClos
     { key: 'skipped', name: t('import.resultSkipped'), items: report.skipped },
   ];
   return <><div className="import-summary">{groups.map(group => <span key={group.key}><strong>{group.items.length}</strong>{group.name}</span>)}<span><strong>{report.failed.length}</strong>{t('import.resultFailed')}</span></div>
-    <p className="muted">{t('import.resultDesc')}</p>
+    <p className="muted">{description ?? t('import.resultDesc')}</p>
     {groups.filter(group => group.items.length).map(group => <section className="import-result-group" key={group.key}><h3>{group.name}</h3><div className="report-list">{group.items.map((name, index) => <p key={index}>{group.key === 'kept-both' ? <Copy size={14}/> : <Check size={14}/>}<span>{name}</span></p>)}</div></section>)}
     {report.failed.map((item, index) => <div className="notice error" key={index}><strong>{item.name}</strong><p>{item.error}</p></div>)}
-    <div className="dialog-actions"><button className="button primary" onClick={onClose}>{t('import.doneBtn')}</button></div></>;
+    {onClose && <div className="dialog-actions"><button className="button primary" onClick={onClose}>{t('import.doneBtn')}</button></div>}</>;
 }

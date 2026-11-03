@@ -20,6 +20,8 @@ const locales = {
       pickImportDir: '选择包含 ArchiveFile 存档的目录，或 SaveHub 导出目录',
       pickExportDir: '选择存档导出位置',
       pickBatchExportDir: '选择存档的统一导出位置',
+      pickGameImportDir: '选择 SaveHub 游戏导出文件夹',
+      pickGameExportDir: '选择游戏导出位置',
     },
     ipc: {
       untrustedOrigin: '请求来源不受信任。',
@@ -53,6 +55,8 @@ const locales = {
       pickImportDir: 'Select a folder containing ArchiveFile saves or a SaveHub export folder',
       pickExportDir: 'Select Export Destination',
       pickBatchExportDir: 'Select Batch Export Destination',
+      pickGameImportDir: 'Select a SaveHub Game Export Folder',
+      pickGameExportDir: 'Select Game Export Destination',
     },
     ipc: {
       untrustedOrigin: 'Untrusted request origin.',

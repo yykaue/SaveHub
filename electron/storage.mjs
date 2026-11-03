@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_LANGUAGE, LANGUAGES, normalizeLanguage, translate } from './i18n.mjs';
+import { normalizeGame, removeGame, purgeGameSnapshots, exportGames, prepareGameImport, reviewGameImport, executeGameImport } from './game-transfer.mjs';
 
 export { LANGUAGES };
 export const THEMES = ['ink', 'tech', 'cyber', 'glass'];
@@ -196,6 +197,7 @@ export class SaveStore {
     this.fault = fault;
     this.busy = false;
     this.pendingImport = null;
+    this.pendingGameImport = null;
     this.recoveryMessages = [];
   }
 
@@ -215,6 +217,10 @@ export class SaveStore {
       await this.saveConfig();
     }
     await this.recoverTransactions();
+    for (const game of this.config.games.filter(game => game.purgeSnapshotsPending)) {
+      try { await purgeGameSnapshots(this, game.id); }
+      catch (error) { this.recoveryMessages.push(`游戏存档清理未完成，请在游戏管理中重试：${game.name}（${error.message}）`); }
+    }
     await this.recoverImportReplacements();
     return this;
   }
@@ -295,38 +301,45 @@ export class SaveStore {
 
   async upsertGame(input) {
     return this.exclusive(async () => {
-      if (!input || typeof input.name !== 'string' || !input.name.trim() || input.name.length > 80) throw new Error('游戏名称需要 1–80 个字符。');
-      const existing = input.id ? this.game(input.id) : null;
-      const locations = {};
-      for (const platform of ['win32', 'darwin']) {
-        const location = input.locations?.[platform] || { root: '', items: [] };
-        if (typeof location.root !== 'string' || location.root.length > 4096) throw new Error('游戏根目录无效。');
-        locations[platform] = { root: location.root.trim(), items: cleanItems(location.items, { allowEmpty: true }) };
-      }
-      const icon = typeof input.icon === 'string' ? input.icon : 'gamepad';
-      if (!['ring', 'spire', 'flame', 'gamepad', 'swords', 'gem', 'ghost', 'rocket'].includes(icon) && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(icon)) throw new Error('请使用 PNG、JPEG 或 WebP 图标。');
-      if (icon.length > 3_000_000) throw new Error('图标过大，请选择小于 2 MB 的图片。');
-      const game = {
-        ...existing, id: existing?.id || randomUUID(), name: input.name.trim(),
-        subtitle: typeof input.subtitle === 'string' ? input.subtitle.trim().slice(0, 80) : '',
-        icon, color: /^#[a-f0-9]{6}$/i.test(input.color) ? input.color : '#8a9270', locations,
-        legacyRoot: typeof input.legacyRoot === 'string' ? input.legacyRoot.trim().slice(0, 4096) : '',
-        createdAt: existing?.createdAt || new Date().toISOString(),
-      };
-      if (existing) this.config.games[this.config.games.findIndex(item => item.id === game.id)] = game;
-      else this.config.games.push(game);
-      await this.saveConfig();
-      await atomicJson(path.join(this.gameDir(game.id), 'game.json'), game);
+      const game = normalizeGame(input, input?.id ? this.game(input.id) : null);
+      await this.commitGame(game);
       return game.id;
     });
   }
 
-  async removeGame(id, undo = false) {
-    return this.exclusive(async () => {
-      const game = this.game(id, undo);
-      if (undo) delete game.deletedAt; else game.deletedAt = new Date().toISOString();
-      await this.saveConfig();
-    });
+  async commitGame(game) {
+    const previous = this.config;
+    const games = previous.games.filter(item => item.id !== game.id);
+    const index = previous.games.findIndex(item => item.id === game.id);
+    games.splice(index < 0 ? games.length : index, 0, game);
+    this.config = { ...previous, games };
+    try { await this.saveConfig(); } catch (error) { this.config = previous; throw error; }
+    // library.json is authoritative; a failed cache write cannot undo a committed game.
+    await atomicJson(path.join(this.gameDir(game.id), 'game.json'), game).catch(() => {});
+  }
+
+  async removeGame(id, undo = false, deleteRecords = false) {
+    return this.exclusive(() => removeGame(this, id, undo, deleteRecords));
+  }
+
+  async exportGames(ids, destination, includeSnapshots = false) {
+    return this.exclusive(() => exportGames(this, ids, destination, includeSnapshots));
+  }
+
+  async prepareGameImport(directory) {
+    return this.exclusive(() => prepareGameImport(this, directory));
+  }
+
+  async reviewGameImport(planId, decisions) {
+    return this.exclusive(() => reviewGameImport(this, planId, decisions));
+  }
+
+  async executeGameImport(planId, decisions) {
+    return this.exclusive(() => executeGameImport(this, planId, decisions));
+  }
+
+  cancelGameImport(planId) {
+    if (this.pendingGameImport?.id === planId) this.pendingGameImport = null;
   }
 
   async location(game, entriesOverride) {
@@ -354,7 +367,7 @@ export class SaveStore {
     });
   }
 
-  async capture(game, root, entries, { label, note = '', kind = 'manual', allowMissing = false, origin, favorite = false, protected: protectedTag = false, expectedFingerprint, replace } = {}) {
+  async capture(game, root, entries, { label, note = '', kind = 'manual', allowMissing = false, origin, favorite = false, protected: protectedTag = false, expectedFingerprint, replace, metadata } = {}) {
     if (typeof label !== 'string' || !label.trim() || label.length > 100) throw new Error('请填写 1–100 个字符的存档名称。');
     if (typeof note !== 'string' || note.length > 2000) throw new Error('存档备注不能超过 2,000 个字符。');
     await assertNoLinks(root);
@@ -375,6 +388,7 @@ export class SaveStore {
         fileCount: source.records.filter(record => record.type === 'file').length,
         bytes: source.records.reduce((total, record) => total + (record.size || 0), 0),
         ...(origin ? { origin } : {}),
+        ...(metadata || {}),
         ...(replace ? { id: replace.id, createdAt: replace.createdAt, favorite: replace.favorite, protected: replace.protected } : {}),
       };
       validateManifest(meta);
@@ -689,6 +703,8 @@ export class SaveStore {
       await assertNoLinks(file);
       const journal = JSON.parse(await fs.readFile(file, 'utf8'));
       if (this.importReplacementPaths(journal).file !== file) throw new Error('导入覆盖事务身份不一致。');
+      // Explicit game cleanup owns these payloads; never resurrect them on restart.
+      if (this.config.games.some(game => game.id === journal.gameId && game.purgeSnapshotsPending)) continue;
       await this.finishImportReplacement(journal);
       if (journal.status === 'prepared') this.recoveryMessages.push('已还原上次意外中断的导入覆盖，原存档已保留。');
     }
@@ -698,7 +714,9 @@ export class SaveStore {
     const key = value => this.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
     // An imported directory identifies a save even when its contents have changed.
     // Equal contents in distinct source directories may be intentional checkpoints.
-    return snapshots.filter(snapshot => snapshot.origin?.path && key(snapshot.origin.path) === key(candidate.source));
+    return snapshots.filter(snapshot => (snapshot.origin?.path && key(snapshot.origin.path) === key(candidate.source)) ||
+      (candidate.bundle && candidate.meta && (snapshot.id === candidate.meta.id ||
+        (snapshot.origin?.gameId === candidate.meta.gameId && snapshot.origin?.snapshotId === candidate.meta.id))));
   }
 
   async prepareImport(gameId, directory) {
@@ -714,17 +732,16 @@ export class SaveStore {
     if (this.pendingImport?.id === planId) this.pendingImport = null;
   }
 
-  async prepareImportPlan(gameId, directory) {
-    this.pendingImport = null;
-    const game = this.game(gameId);
-    const entries = cleanItems(game.locations[this.platform]?.items || []);
+  async prepareImportPlan(gameId, directory, { game = this.game(gameId), bundle = false } = {}) {
+    if (!bundle) this.pendingImport = null;
+    const entries = cleanItems(game.locations[this.platform]?.items || [], { allowEmpty: bundle });
     if (typeof directory !== 'string' || !path.isAbsolute(directory)) throw new Error('请选择旧存档目录。');
     directory = path.resolve(directory);
     await assertNoLinks(directory);
     if (within(this.dataDir, directory) || within(directory, this.dataDir)) throw new Error('不能从 SaveHub 资料库本身导入。');
     const manifestFile = path.join(directory, 'manifest.json');
     const collectionFile = path.join(directory, 'collection.json');
-    const plan = { id: randomUUID(), gameId, entries, directory, items: [], failed: [] };
+    const plan = { id: randomUUID(), gameId, entries, directory, items: [], failed: [], bundle };
     const existing = await this.snapshots(gameId, true);
     let candidates;
     const namedExports = await this.namedExportCandidates(directory);
@@ -752,7 +769,10 @@ export class SaveStore {
           const meta = candidate.meta || validateManifest(JSON.parse(await fs.readFile(manifest, 'utf8')));
           if (candidate.id && candidate.id !== meta.id) throw new Error('导出存档的身份与批量清单不一致。');
           candidate.name = meta.label;
-          if (!equal([...meta.entries].sort(), [...entries].sort())) throw new Error('导出存档的相对路径与当前游戏配置不一致。');
+          if (!bundle && !equal([...meta.entries].sort(), [...entries].sort())) throw new Error('导出存档的相对路径与当前游戏配置不一致。');
+          if (bundle && (!['manual', 'imported', 'safety'].includes(meta.kind) || !['win32', 'darwin'].includes(meta.platform) || !Number.isFinite(Date.parse(meta.createdAt)) || (meta.deletedAt && !Number.isFinite(Date.parse(meta.deletedAt))) || meta.purgePending)) throw new Error('游戏包的存档状态无效或尚未完成清理。');
+          candidate.bundle = bundle;
+          candidate.entries = bundle ? meta.entries : entries;
           candidate.source = candidate.meta ? candidate.exported : path.join(candidate.exported, 'payload');
           candidate.allowMissing = meta.absent.length > 0;
           candidate.meta = meta;
@@ -760,7 +780,7 @@ export class SaveStore {
           candidate.favorite = meta.favorite;
           candidate.protected = meta.protected;
         }
-        const data = await inventory(candidate.source, entries, { allowMissing: Boolean(candidate.allowMissing) });
+        const data = await inventory(candidate.source, candidate.entries || entries, { allowMissing: Boolean(candidate.allowMissing) });
         if (candidate.meta && signature(data) !== signature(candidate.meta)) throw new Error('导出存档的完整性校验失败。');
         plan.items.push({ ...candidate, id: randomUUID(), fingerprint: fingerprint(data),
           bytes: data.records.reduce((total, record) => total + (record.size || 0), 0),
@@ -769,7 +789,7 @@ export class SaveStore {
         });
       } catch (error) { plan.failed.push({ name: candidate.name, error: error.message }); }
     }
-    this.pendingImport = plan;
+    if (!bundle) this.pendingImport = plan;
     return plan;
   }
 
@@ -781,7 +801,13 @@ export class SaveStore {
     const plan = this.pendingImport;
     if (!plan || plan.id !== planId) throw new Error('本次导入检查已失效，请重新选择目录。');
     const game = this.game(plan.gameId);
-    if (!equal(cleanItems(game.locations[this.platform]?.items || []), plan.entries)) throw new Error('游戏配置已变化，请重新检查导入目录。');
+    const choices = await this.validateImportPlan(plan, decisions);
+    this.pendingImport = null; // An execution token is single use, including partial failure.
+    return this.applyImportPlan(plan, choices, game);
+  }
+
+  async validateImportPlan(plan, decisions) {
+    if (!plan.bundle && !equal(cleanItems(this.game(plan.gameId).locations[this.platform]?.items || []), plan.entries)) throw new Error('游戏配置已变化，请重新检查导入目录。');
     const duplicates = plan.items.filter(item => item.matches.length);
     if (!Array.isArray(decisions) || decisions.length !== duplicates.length) throw new Error('请为每份重复存档选择处理方式。');
     const choices = new Map(), targets = new Set();
@@ -797,11 +823,15 @@ export class SaveStore {
       choices.set(item.id, decision);
     }
     // Reject stale library decisions before committing any item in the batch.
-    const existing = await this.snapshots(game.id, true);
+    const existing = await this.snapshots(plan.gameId, true);
     for (const item of plan.items) {
       if (!equal(this.importMatches(item, existing), item.matches)) throw new Error('重复存档的状态已变化，请重新检查后选择处理方式。');
     }
-    this.pendingImport = null; // An execution token is single use, including partial failure.
+    return choices;
+  }
+
+  async applyImportPlan(plan, choices, game) {
+    const existing = await this.snapshots(game.id, true);
     const report = { imported: [], overwritten: [], keptBoth: [], skipped: [], failed: [...plan.failed] };
     const names = new Set([...existing.map(item => foldedName(item.label)), ...plan.items.map(item => foldedName(item.name.slice(0, 100)))]);
     for (const [index, item] of plan.items.entries()) {
@@ -816,9 +846,10 @@ export class SaveStore {
         }
         const replace = choice?.action === 'overwrite' ? await this.readSnapshot(game.id, choice.targetId) : undefined;
         if (replace && !equal(publicSnapshot(replace), item.matches.find(target => target.id === replace.id))) throw new Error('覆盖目标已变化，请重新检查后再导入。');
-        await this.capture(game, item.source, plan.entries, { label, note: item.note || this.t('storage.importedFromNote', { source: item.source }), kind: 'imported',
-          allowMissing: Boolean(item.allowMissing), origin: { path: item.source }, favorite: item.favorite, protected: item.protected,
+        await this.capture(game, item.source, item.entries || plan.entries, { label, note: item.note || this.t('storage.importedFromNote', { source: item.source }), kind: 'imported',
+          allowMissing: Boolean(item.allowMissing), origin: { path: item.source, ...(item.bundle ? { gameId: item.meta.gameId, snapshotId: item.meta.id } : {}) }, favorite: item.favorite, protected: item.protected,
           expectedFingerprint: item.fingerprint, replace,
+          metadata: item.bundle ? { kind: item.meta.kind, platform: item.meta.platform, createdAt: item.meta.createdAt, ...(item.meta.deletedAt ? { deletedAt: item.meta.deletedAt } : {}) } : undefined,
         });
         names.add(foldedName(label));
         if (choice?.action === 'overwrite') report.overwritten.push(item.name);
@@ -941,3 +972,5 @@ export class SaveStore {
     });
   }
 }
+
+export { statMaybe, assertTreeNoLinks, exportName, uniqueExportName, foldedName, fingerprint };

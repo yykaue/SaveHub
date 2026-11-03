@@ -12,7 +12,7 @@ export interface GameInput {
   locations: Record<Platform, Location>; legacyRoot: string;
 }
 export interface Game extends GameInput {
-  id: string; createdAt: string; deletedAt?: string; snapshots: Snapshot[]; restorePoints: Snapshot[];
+  id: string; createdAt: string; deletedAt?: string; purgeSnapshotsPending?: boolean; snapshots: Snapshot[]; restorePoints: Snapshot[];
   pathStatus: 'ready' | 'unconfigured' | 'missing'; legacyCount: number;
 }
 export interface AppState { games: Game[]; theme: Theme; language: Language; platform: Platform; dataDir: string; recoveryMessages: string[]; version: string }
@@ -24,12 +24,22 @@ export interface ImportPlan { id: string; gameId: string; directory: string; ite
 export interface ImportReport { imported: string[]; overwritten: string[]; keptBoth: string[]; skipped: string[]; failed: { name: string; error: string }[] }
 export interface BatchReport { updated: string[]; failed: { id: string; label: string; error: string }[] }
 export interface ExportResult { folder: string; count: number }
+export interface GameImportItem { id: string; game: GameInput & { id: string; createdAt: string }; source: string; includesSnapshots: boolean; matches: (GameInput & { id: string; createdAt: string; deletedAt?: string; purgeSnapshotsPending?: boolean })[] }
+export interface GameImportPlan { id: string; directory: string; items: GameImportItem[]; failed: { name: string; error: string }[] }
+export interface GameImportReview { id: string; planId: string; failed: { name: string; error: string }[]; games: { itemId: string; name: string; action: ImportAction | 'import'; snapshots: ImportPlan | null }[] }
+export interface GameSnapshotDecision { itemId: string; decisions: ImportDecision[] }
+export interface GameImportReport { games: ImportReport; snapshots: { gameName: string; report: ImportReport }[] }
 export interface Bridge {
   state(): Promise<AppState>;
   setTheme(theme: Theme): Promise<void>;
   setLanguage(language: Language): Promise<void>;
   saveGame(game: GameInput): Promise<string>;
-  removeGame(id: string, undo?: boolean): Promise<void>;
+  removeGame(id: string, undo?: boolean, deleteRecords?: boolean): Promise<void>;
+  exportGames(ids: string[], includeSnapshots?: boolean): Promise<(ExportResult & { snapshotCount: number }) | null>;
+  importGames(): Promise<GameImportPlan | null>;
+  reviewGameImport(planId: string, decisions: ImportDecision[]): Promise<GameImportReview>;
+  executeGameImport(reviewId: string, decisions: GameSnapshotDecision[]): Promise<GameImportReport>;
+  cancelGameImport(planId: string): Promise<void>;
   pickDirectory(): Promise<string | null>;
   pickIcon(): Promise<string | null>;
   saveSnapshot(id: string, details: { label: string; note: string }): Promise<Snapshot>;

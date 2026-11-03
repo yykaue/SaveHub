@@ -15,6 +15,17 @@ Windows: Open `release/1.1.4/win-unpacked/SaveHub.exe`, or use the installer / p
 
 Preset games can be edited or removed, and you can add any custom game. Icons support built-in emblems as well as local PNG / JPG / WebP / ICO images. Imported images are copied into the configuration directory so they do not depend on the original file remaining in place.
 
+## Game Management
+
+The new **Game Management** sidebar page supports search, add, edit, delete, restore, import and single / selected / all game exports.
+
+- Deleting a game retains its save records by default. **Permanently delete all save records for this game** physically removes every SaveHub record, including protected, favorite and trashed saves and restore points. Live game files are unaffected.
+- Export defaults to game settings, including names, icons, colors and Windows / macOS paths. **Include save records** also exports all records with their original states, timestamps, notes and integrity information.
+- Import an entire game export bundle or an individual game folder. Duplicate identity or name matches offer per-item and bulk overwrite, skip and keep-both choices. Overwrite replaces settings while retaining existing saves; skipping a game also skips its bundled saves.
+- Bundled saves have a separate conflict review using the existing overwrite restrictions and replacement rollback. No game settings or saves are written until final confirmation. Canceling either step leaves the library unchanged. Check local paths after importing.
+
+See [game management format and verification](docs/游戏管理.md) for details. These changes are in source and `dist/`; existing `release/1.1.4/` installers require rebuilding to include them.
+
 ## Reference Scripts & Mapping
 
 SaveHub was designed with compatibility for legacy `save.sh` / `load.sh` backup scripts from these three games:

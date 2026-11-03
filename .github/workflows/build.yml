@@ -36,6 +36,7 @@ jobs:
       - run: pnpm test:interactions
       - run: pnpm test:deletion
       - run: pnpm test:import
+      - run: pnpm test:games
       - run: pnpm dist:${{ matrix.target }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -52,5 +53,6 @@ jobs:
             docs/screenshots/interaction-verification.json
             docs/screenshots/deletion-verification.json
             docs/screenshots/import-verification.json
+            docs/screenshots/game-management-verification.json
             docs/screenshots/portable-verification.json
           if-no-files-found: error

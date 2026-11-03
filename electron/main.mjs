@@ -85,7 +85,18 @@ function registerHandlers() {
   register('setTheme', theme => store.setTheme(theme));
   register('setLanguage', async language => { await store.setLanguage(language); updateApplicationMenu(); });
   register('saveGame', game => store.upsertGame(game));
-  register('removeGame', (id, undo) => store.removeGame(id, Boolean(undo)));
+  register('removeGame', (id, undo = false, deleteRecords = false) => store.removeGame(id, undo, deleteRecords));
+  register('exportGames', async (ids, includeSnapshots = false) => {
+    const directory = await chooseFolder(t('dialogs.pickGameExportDir'));
+    return directory ? store.exportGames(ids, directory, includeSnapshots) : null;
+  });
+  register('importGames', async () => {
+    const directory = await chooseFolder(t('dialogs.pickGameImportDir'));
+    return directory ? store.prepareGameImport(directory) : null;
+  });
+  register('reviewGameImport', (id, decisions) => store.reviewGameImport(id, decisions));
+  register('executeGameImport', (id, decisions) => store.executeGameImport(id, decisions));
+  register('cancelGameImport', id => store.cancelGameImport(id));
   register('pickDirectory', () => chooseFolder(t('dialogs.pickSaveDir')));
   register('pickIcon', async () => {
     const result = await dialog.showOpenDialog(window, { title: t('dialogs.pickGameIcon'), properties: ['openFile'], filters: [{ name: t('dialogs.imageFilterName'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }] });
