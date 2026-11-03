@@ -180,9 +180,11 @@ After building, `pnpm start` opens the production UI inside Electron. All depend
 electron/storage.mjs       Backup, full restore, SHA-256 verification, transaction rollback, import/export
 electron/presets.mjs       Literal parser for legacy scripts & default game presets
 electron/main.mjs          Electron window lifecycle, native dialogs & IPC security boundaries
+electron/i18n.mjs          Main-process & storage-layer i18n dictionaries and key resolver
 electron/preload.cjs       Minimal, explicitly enumerated renderer bridge API
+src/i18n/                  Frontend i18n module (language registry, ZH/EN locale dictionaries & typed keys)
 src/App.tsx                Game library, save timeline, edit forms, theme & language switching
-src/format.ts              Bilingual (ZH/EN) copy helper, date & byte size formatting
+src/format.ts              Localized date, preset game name & byte size formatting
 src/SnapshotList.tsx       Badge filter views, selection, batch actions & column sorting
 src/RestorePoints.tsx      Restore Points & Removed Restore Points selection, recovery & deletion
 src/ImportDialog.tsx       Per-item duplicate import resolution, batch quick-set & import summary

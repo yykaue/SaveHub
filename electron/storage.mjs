@@ -3,9 +3,10 @@ import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { DEFAULT_LANGUAGE, LANGUAGES, normalizeLanguage, translate } from './i18n.mjs';
 
+export { LANGUAGES };
 export const THEMES = ['ink', 'tech', 'cyber', 'glass'];
-export const LANGUAGES = ['zh', 'en'];
 const ID = /^[a-z0-9-]{1,64}$/;
 const MAX_FILES = 100000;
 const EXPORT_INDEX = '.savehub-exports';
@@ -198,8 +199,7 @@ export class SaveStore {
     this.recoveryMessages = [];
   }
 
-  isEn() { return this.config?.language === 'en'; }
-  msg(zh, en) { return this.isEn() ? en : zh; }
+  t(key, params) { return translate(this.config?.language, key, params); }
 
   async init(presets = []) {
     await assertNoLinks(this.dataDir);
@@ -207,11 +207,11 @@ export class SaveStore {
     try {
       this.config = JSON.parse(await fs.readFile(this.configFile, 'utf8'));
       if (this.config.version !== 1 || !Array.isArray(this.config.games)) throw new Error('配置格式无效');
-      if (!LANGUAGES.includes(this.config.language)) this.config.language = 'zh';
+      if (!LANGUAGES.includes(this.config.language)) this.config.language = DEFAULT_LANGUAGE;
       this.config.games.forEach(game => safeId(game.id));
     } catch (error) {
       if (!missing(error)) throw new Error(`无法读取游戏库。原文件已保留，请检查 ${this.configFile}：${error.message}`);
-      this.config = { version: 1, theme: 'ink', language: 'zh', games: presets };
+      this.config = { version: 1, theme: 'ink', language: DEFAULT_LANGUAGE, games: presets };
       await this.saveConfig();
     }
     await this.recoverTransactions();
@@ -254,7 +254,7 @@ export class SaveStore {
         const meta = await this.readSnapshot(gameId, id);
         if (includeDeleted || !meta.deletedAt) result.push(publicSnapshot(meta));
       } catch (error) {
-        result.push({ id, gameId, label: this.msg(`损坏的存档 · ${id.slice(0, 8)}`, `Corrupted save · ${id.slice(0, 8)}`), kind: 'manual', corrupted: true, error: error.message, createdAt: '', bytes: 0, fileCount: 0, entries: [] });
+        result.push({ id, gameId, label: this.t('storage.corruptedLabel', { id: id.slice(0, 8) }), kind: 'manual', corrupted: true, error: error.message, createdAt: '', bytes: 0, fileCount: 0, entries: [] });
       }
     }
     return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -274,12 +274,12 @@ export class SaveStore {
       const stored = await this.snapshots(game.id, true);
       return { ...game, snapshots: stored.filter(snapshot => snapshot.kind !== 'safety'), restorePoints: stored.filter(snapshot => snapshot.kind === 'safety'), pathStatus, legacyCount };
     }));
-    return { games, theme: this.config.theme, language: this.config.language || 'zh', platform: this.platform, dataDir: this.dataDir, recoveryMessages: this.recoveryMessages };
+    return { games, theme: this.config.theme, language: normalizeLanguage(this.config.language), platform: this.platform, dataDir: this.dataDir, recoveryMessages: this.recoveryMessages };
   }
 
   async setTheme(theme) {
     return this.exclusive(async () => {
-      if (!THEMES.includes(theme)) throw new Error(this.msg('未知主题。', 'Unknown theme.'));
+      if (!THEMES.includes(theme)) throw new Error(this.t('storage.unknownTheme'));
       this.config.theme = theme;
       await this.saveConfig();
     });
@@ -287,7 +287,7 @@ export class SaveStore {
 
   async setLanguage(language) {
     return this.exclusive(async () => {
-      if (!LANGUAGES.includes(language)) throw new Error(this.msg('未知语言。', 'Unknown language.'));
+      if (!LANGUAGES.includes(language)) throw new Error(this.t('storage.unknownLanguage'));
       this.config.language = language;
       await this.saveConfig();
     });
@@ -528,7 +528,7 @@ export class SaveStore {
       if (meta.deletedAt) throw new Error('请先从回收站找回这份存档。');
       const { root, entries } = await this.location(game);
       if (!equal([...entries].sort(), [...meta.entries].sort())) throw new Error('当前游戏的备份项目与这份存档不一致。请在游戏设置中恢复对应的相对路径后再读档。');
-      const safety = await this.capture(game, root, entries, { label: (this.isEn() ? `Before restore · ${meta.label}` : `读档前 · ${meta.label}`).slice(0, 100), note: this.msg('恢复前自动创建。可用这份存档撤销本次读档。', 'Created automatically before restoring. Use this restore point to undo the restore.'), kind: 'safety', allowMissing: true });
+      const safety = await this.capture(game, root, entries, { label: this.t('storage.beforeRestoreLabel', { label: meta.label }).slice(0, 100), note: this.t('storage.beforeRestoreNote'), kind: 'safety', allowMissing: true });
       const transactionId = randomUUID();
       const stage = path.join(root, `.savehub-restore-${transactionId}`);
       const journalFile = path.join(this.dataDir, 'transactions', `${transactionId}.json`);
@@ -816,7 +816,7 @@ export class SaveStore {
         }
         const replace = choice?.action === 'overwrite' ? await this.readSnapshot(game.id, choice.targetId) : undefined;
         if (replace && !equal(publicSnapshot(replace), item.matches.find(target => target.id === replace.id))) throw new Error('覆盖目标已变化，请重新检查后再导入。');
-        await this.capture(game, item.source, plan.entries, { label, note: item.note || this.msg(`导入自 ${item.source}`, `Imported from ${item.source}`), kind: 'imported',
+        await this.capture(game, item.source, plan.entries, { label, note: item.note || this.t('storage.importedFromNote', { source: item.source }), kind: 'imported',
           allowMissing: Boolean(item.allowMissing), origin: { path: item.source }, favorite: item.favorite, protected: item.protected,
           expectedFingerprint: item.fingerprint, replace,
         });

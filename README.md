@@ -180,9 +180,11 @@ pnpm audit:release       # 核对 Windows 包内代码与发行文件摘要
 electron/storage.mjs       备份、完整恢复、校验、事务回滚、导入导出
 electron/presets.mjs       三个游戏的脚本字面量解析与预设
 electron/main.mjs          Electron 窗口、原生对话框、IPC 权限边界
+electron/i18n.mjs          主进程与存储层的多语言字典与翻译解析
 electron/preload.cjs       最小化、明确列举的 renderer API
+src/i18n/                 前端多语言配置（支持语言注册表、中英字典与类型安全键值）
 src/App.tsx               游戏库、存档时光轴、编辑表单、主题与语言选择
-src/format.ts             中英双语文案、时间与文件大小格式化
+src/format.ts             多语言日期、游戏名与文件大小格式化
 src/SnapshotList.tsx      标记视图、复选、批量操作与表头排序
 src/RestorePoints.tsx     恢复点与已移除恢复点的选择、找回及删除
 src/ImportDialog.tsx      重复导入的逐项处理选择、批量设置及结果

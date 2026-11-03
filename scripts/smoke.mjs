@@ -148,10 +148,13 @@ try {
   await page.getByRole('button', { name: '找回项目', exact: true }).click();
   await expect(page.getByRole('button', { name: /自动化测试游戏 0 份存档/ })).toBeVisible();
   checks.push('Native directory picker, custom image import, dual-platform configuration, game removal and recovery');
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1080, 760));
   await page.getByRole('button', { name: 'English', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByRole('button', { name: /^Save Library/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Switch language', exact: true })).toHaveText('EN');
+  await page.getByRole('button', { name: /^Save Library/ }).click();
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && Array.from(document.querySelectorAll('.button, .filter-tabs button, .sort-heading, .load-button')).every(el => el.scrollWidth <= el.clientWidth + 1)));
   await page.getByRole('button', { name: 'Switch language', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.getByRole('button', { name: /^存档库/ })).toBeVisible();
