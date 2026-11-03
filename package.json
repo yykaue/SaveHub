@@ -23,10 +23,10 @@
     "test:portable": "node scripts/portable-smoke.mjs",
     "audit:release": "node scripts/audit-release.mjs",
     "build": "tsc --noEmit && vite build",
-    "pack:win": "tsc --noEmit && vite build && electron-builder --win --x64 --dir",
-    "dist:win": "tsc --noEmit && vite build && electron-builder --win --x64",
-    "pack:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64 --dir",
-    "dist:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64"
+    "pack:win": "tsc --noEmit && vite build && electron-builder --win --x64 --dir --publish never",
+    "dist:win": "tsc --noEmit && vite build && electron-builder --win --x64 --publish never",
+    "pack:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64 --dir --publish never",
+    "dist:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64 --publish never"
   },
   "devDependencies": {
     "lucide-react": "1.63.0",
