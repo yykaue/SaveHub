@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { SaveStore, cleanItems, within, atomicJson, commitSnapshotDirectory } from '../electron/storage.mjs';
-import { readLiteralScript } from '../electron/presets.mjs';
+import { readLiteralScript, makePresets } from '../electron/presets.mjs';
 
 const testRoot = path.resolve('.test-data');
 async function fixture(t, options = {}) {
@@ -687,6 +687,17 @@ test('script reader translates Git Bash paths without executing shell code', () 
   assert.equal(parsed.root, 'D:/Steam/steamapps/common/SlayTheSpire');
   assert.equal(parsed.legacyRoot, 'C:/Users/Limbo/Desktop/SlayTheSpire');
   assert.deepEqual(parsed.items, ['betaPreferences', 'preferences', 'saves']);
+});
+
+test('presets only derive Windows home paths on Windows', async () => {
+  const mac = await makePresets('darwin', '/Users/example');
+  const elden = mac.find(game => game.id === 'elden-ring');
+  assert.equal(elden.locations.win32.root, '');
+  assert.equal(elden.locations.darwin.root, '');
+  assert.equal(elden.legacyRoot, '');
+  assert(mac.every(game => !game.locations.win32.root.startsWith('/Users/')));
+  const windows = await makePresets('win32', 'C:\\Users\\Example');
+  assert.equal(windows.find(game => game.id === 'elden-ring').locations.win32.root, 'C:\\Users\\Example\\AppData\\Roaming\\EldenRing');
 });
 
 test('snapshot preserves file bytes, empty folders, timestamps and independent game identity', async t => {

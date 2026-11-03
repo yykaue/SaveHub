@@ -133,7 +133,7 @@ SaveHub/
 
 最低系统要求依据当前 Electron 运行时：Windows 10 及以上，macOS 13 Ventura 及以上。Mac 发行目标只配置 **arm64**，不构建 Intel 版本。Windows 当前提供 x64 版本。
 
-本机是 Windows；macOS 的应用启动、文件权限和安装包仍需在 Apple Silicon Mac 上验证。macOS DMG 在 Mac 上构建。发布给其他用户前，需要配置 Apple Developer 签名与公证；本项目未包含证书或公证凭据。Windows 包也未配置代码签名。
+2026-11-03 已在 Apple Silicon Mac（macOS 26.6）完成源码测试、四项 GUI 测试和 `pnpm dist:mac` 打包，并在打包后的 `.app` 上通过基础 GUI 测试。Mac 包使用 ad-hoc 签名（`build.mac.identity: "-"`），可避免未签名包下载后被提示“已损坏”；其他 Mac 首次打开仍需在“隐私与安全性”中允许。发布给其他用户前，需要配置 Apple Developer 签名与公证（届时删除 `identity: "-"`）；本项目未包含证书或公证凭据。Windows 包也未配置代码签名。
 
 ## 开发与构建
 
@@ -161,6 +161,7 @@ pnpm test:deletion       # 回收站和恢复点的批量找回、物理删除�
 pnpm test:import         # 重复导入的逐项选择、混合执行、取消与四主题界面
 pnpm pack:win            # Windows 解包版
 pnpm dist:win            # Windows 安装版 + 便携版
+pnpm pack:mac            # macOS arm64 解包版（.app）
 pnpm dist:mac            # 在 Mac 上构建 arm64 DMG + ZIP
 pnpm test:portable       # Windows 便携版的解包、启动与存读档验证
 pnpm audit:release       # 核对 Windows 包内代码与发行文件摘要

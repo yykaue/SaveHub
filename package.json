@@ -25,6 +25,7 @@
     "build": "tsc --noEmit && vite build",
     "pack:win": "tsc --noEmit && vite build && electron-builder --win --x64 --dir",
     "dist:win": "tsc --noEmit && vite build && electron-builder --win --x64",
+    "pack:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64 --dir",
     "dist:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64"
   },
   "devDependencies": {
@@ -60,7 +61,8 @@
       "target": [{ "target": "dmg", "arch": ["arm64"] }, { "target": "zip", "arch": ["arm64"] }],
       "category": "public.app-category.utilities",
       "icon": "build/icon.png",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "identity": "-"
     }
   }
 }
