@@ -135,15 +135,15 @@ export default function App() {
     else await executeImport(plan, []);
   };
   const runGameImport = async () => {
-    const plan = await perform(t('gameManagement.importing'), () => api.importGames());
+    const plan = await perform(t('games.importing'), () => api.importGames());
     if (plan) setModal({ type: 'game-import', plan });
   };
   const reviewGames = async (planId: string, decisions: ImportDecision[]) => {
-    const review = await perform(t('gameManagement.reviewing'), () => api.reviewGameImport(planId, decisions));
+    const review = await perform(t('games.reviewing'), () => api.reviewGameImport(planId, decisions));
     if (review) setModal({ type: 'game-import-review', review });
   };
   const importGames = async (reviewId: string, decisions: GameSnapshotDecision[]) => {
-    const report = await perform(t('gameManagement.executing'), () => api.executeGameImport(reviewId, decisions));
+    const report = await perform(t('games.executing'), () => api.executeGameImport(reviewId, decisions));
     if (report) setModal({ type: 'game-import-report', report });
   };
   const snapshotAction = (action: SnapshotAction, snapshot: Snapshot) => {
@@ -258,8 +258,8 @@ export default function App() {
       {modal.type === 'delete' && <DeleteConfirmation snapshots={modal.snapshots} permanent={modal.permanent} busy={!!busy} onCancel={closeModal} onConfirm={() => void confirmDelete(modal)}/>}
       {modal.type === 'batch-report' && <><p className="dialog-description">{t('modals.batchReport.summary', { updated: modal.report.updated.length, failed: modal.report.failed.length })}</p><p className="muted">{t(modal.permanent ? 'modals.batchReport.permanentDesc' : 'modals.batchReport.softDesc')}</p>{modal.report.failed.map(item => <div className="notice error" key={item.id}><strong>{item.label}</strong><p>{item.error}</p></div>)}<div className="dialog-actions"><button className="button secondary" onClick={closeModal}>{t('modals.closeBtn')}</button></div></>}
       {modal.type === 'restore-points' && current && <><RestorePoints points={current.restorePoints} selection={pointSelections[current.id] ?? { active: [], removed: [] }} busy={!!busy} canRestore={current.pathStatus === 'ready'} onSelect={(group, ids) => setPointSelections(all => ({ ...all, [current.id]: { ...(all[current.id] ?? { active: [], removed: [] }), [group]: ids } }))} onRestore={snapshot => setModal({ type: 'restore', snapshot })} onExport={snapshot => snapshotAction('export', snapshot)} onDelete={snapshots => requestDelete(snapshots, 'restore-points')} onRecover={ids => void recoverBatch(current.id, ids, 'restore-points')}/><div className="dialog-actions"><button className="button secondary" onClick={() => setModal(null)}>{t('modals.closeBtn')}</button></div></>}
-      {modal.type === 'remove-game' && <GameDeleteConfirmation key={modal.game.id} game={modal.game} busy={!!busy} onCancel={closeModal} onConfirm={deleteRecords => void perform(t('gameManagement.deleting'), () => api.removeGame(modal.game.id, false, deleteRecords), t(deleteRecords ? 'gameManagement.purgeSuccess' : 'gameManagement.deleteSuccess'), true)}/>}
-      {modal.type === 'export-games' && <GameExportConfirmation games={modal.games} busy={!!busy} onCancel={closeModal} onConfirm={includeSnapshots => void perform(t('gameManagement.exporting'), async () => { const result = await api.exportGames(modal.games.map(game => game.id), includeSnapshots); if (result) { setToast({ text: t('gameManagement.exportSuccess', { count: result.count, saves: result.snapshotCount, folder: result.folder }) }); setModal(null); } })}/>}
+      {modal.type === 'remove-game' && <GameDeleteConfirmation key={modal.game.id} game={modal.game} busy={!!busy} onCancel={closeModal} onConfirm={deleteRecords => void perform(t('games.deleting'), () => api.removeGame(modal.game.id, false, deleteRecords), t(deleteRecords ? 'games.purgeSuccess' : 'games.deleteSuccess'), true)}/>}
+      {modal.type === 'export-games' && <GameExportConfirmation games={modal.games} busy={!!busy} onCancel={closeModal} onConfirm={includeSnapshots => void perform(t('games.exporting'), async () => { const result = await api.exportGames(modal.games.map(game => game.id), includeSnapshots); if (result) { setToast({ text: t('games.exportSuccess', { count: result.count, saves: result.snapshotCount, folder: result.folder }) }); setModal(null); } })}/>}
       {modal.type === 'game-import' && <GameImportChoices key={modal.plan.id} plan={modal.plan} busy={!!busy} onCancel={closeModal} onConfirm={decisions => void reviewGames(modal.plan.id, decisions)}/>}
       {modal.type === 'game-import-review' && <GameImportReviewDialog key={modal.review.id} review={modal.review} busy={!!busy} onCancel={closeModal} onConfirm={decisions => void importGames(modal.review.id, decisions)}/>}
       {modal.type === 'game-import-report' && <GameImportResults report={modal.report} onClose={closeModal}/>}
@@ -302,11 +302,11 @@ function modalTitle(modal: ModalState) {
     save: modal.type === 'save' && modal.snapshot ? t('modals.titles.editSave') : t('modals.titles.createSave'),
     restore: t('modals.titles.restore'),
     delete: modal.type === 'delete' && modal.permanent ? t('modals.titles.deletePermanent') : t('modals.titles.deleteSoft'),
-    'remove-game': t('gameManagement.deleteTitle'),
-    'export-games': t('gameManagement.exportTitle'),
-    'game-import': t('gameManagement.importTitle'),
-    'game-import-review': t('gameManagement.reviewTitle'),
-    'game-import-report': t('gameManagement.resultTitle'),
+    'remove-game': t('games.deleteTitle'),
+    'export-games': t('games.exportTitle'),
+    'game-import': t('games.importTitle'),
+    'game-import-review': t('games.reviewTitle'),
+    'game-import-report': t('games.resultTitle'),
     detail: t('modals.titles.detail'),
     'restore-points': t('modals.titles.restorePoints'),
     'batch-report': t('modals.titles.batchReport'),

@@ -53,11 +53,13 @@ try {
   await expect(navigation.getByRole('button').first()).toHaveAccessibleName('全部游戏');
   await expect(navigation.getByRole('button', { name: '游戏管理', exact: true })).toHaveCount(0);
   await expect(page.locator('[data-page="games"]')).toBeVisible();
-  await expect(page.getByRole('heading', { name: '全部游戏', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '你的世界，都在这里。', exact: true })).toBeVisible();
+  await expect(page.locator('.all-games .page-heading > p')).toHaveText('每个游戏独立管理，让不同的冒险各得其所。');
   await expect(page.locator('.all-games')).toHaveAttribute('data-layout', 'cards');
   await expect(page.locator('.game-card.catalog-game')).toHaveCount(3);
   await page.getByRole('button', { name: '列表视图', exact: true }).click();
   await expect(page.locator('.management-game')).toHaveCount(3);
+  await expect(page.getByRole('heading', { name: '你的世界，都在这里。', exact: true })).toBeVisible();
   done('All Games is the default home and first workspace menu; the duplicate management menu is gone and both original presentation styles are available');
   await expect(page.locator('.catalog-game')).toHaveCount(3);
   await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('雪原');
@@ -219,6 +221,10 @@ try {
   }
   await page.getByRole('button', { name: '切换语言', exact: true }).click(); await idle();
   await expect(page.getByRole('button', { name: 'All Games', exact: true })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.getByRole('heading', { name: 'All Your Worlds, Right Here.', exact: true })).toBeVisible();
+  await expect(page.locator('.all-games .page-heading > p')).toHaveText('Each game is managed independently, giving every adventure its own space.');
+  await page.screenshot({ path: path.join(screenshots, 'all-games-heading-en.png'), animations: 'disabled' });
   await row(copy.id).getByRole('button', { name: 'Export game 雪原之旅 (2)', exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: 'Include save records', exact: true })).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -226,8 +232,17 @@ try {
   await expect(page.locator('[data-page="games"]')).toBeVisible();
   await expect(page.locator('.all-games')).toHaveAttribute('data-layout', 'list');
   await expect(page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('button').first()).toHaveAccessibleName('All Games');
+  await expect(page.getByRole('heading', { name: 'All Your Worlds, Right Here.', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Switch language', exact: true }).click(); await idle();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  await expect(page.getByRole('heading', { name: '你的世界，都在这里。', exact: true })).toBeVisible();
+  await expect(page.locator('.all-games .page-heading > p')).toHaveText('每个游戏独立管理，让不同的冒险各得其所。');
+  await expect(page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button').first()).toHaveAccessibleName('全部游戏');
+  await page.screenshot({ path: path.join(screenshots, 'all-games-heading-zh.png'), animations: 'disabled' });
+  await page.getByRole('button', { name: '卡片视图', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '你的世界，都在这里。', exact: true })).toBeVisible();
   assert(!(await diskGames()).some(game => game.id === gameId));
-  done('Both styles preserve search and selection through all four themes at 1060×720; English works and the view preference survives reload');
+  done('Both styles work in all four themes at 1060×720; headings and descriptions switch accurately between Chinese and English, English persists after reload, and the view preference is retained');
 
   assert.equal(await fs.readFile(path.join(source, 'saves', 'progress.dat'), 'utf8'), 'live-untouched');
   assert.deepEqual(errors, []);
