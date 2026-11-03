@@ -20,10 +20,10 @@ Windows：打开 `release/1.1.4/win-unpacked/SaveHub.exe`，或使用 `release/1
 | 游戏 | 原脚本的游戏根目录（target） | 备份项目（array） |
 | --- | --- | --- |
 | 杀戮尖塔 | `D:\Steam\steamapps\common\SlayTheSpire` | `betaPreferences`、`preferences`、`saves` |
-| 艾尔登法环 | `%USERPROFILE%\AppData\Roaming\EldenRing` | `76561198132913813` |
-| 黑暗之魂 II | `%USERPROFILE%\AppData\Roaming\DarkSoulsII` | `011000010a4a6695` |
+| 艾尔登法环 | `%USERPROFILE%\AppData\Roaming\EldenRing` | `Steam账户ID` |
+| 黑暗之魂 II | `%USERPROFILE%\AppData\Roaming\DarkSoulsII` | `Steam账户ID` |
 
-首次在 Windows 启动时，会尝试读取用户桌面对应目录的 `save.sh`，只解析 `source` / `target` / `array` 的字面量，**不会执行脚本**。没有脚本时使用上述预设，路径、账号目录都可以手动修改。
+首次在 Windows 启动时，会尝试读取用户桌面对应目录的 `save.sh`，只解析 `source` / `target` / `array` 的字面量，**不会执行脚本**。没有脚本时使用上述根目录预设；艾尔登法环与黑暗之魂 II 不预置账号目录，需在「游戏设置」中填写自己的 `Steam账户ID` 目录。路径、账号目录都可以手动修改。
 
 旧脚本的 `source` 对应原备份目录。应用创建的新存档使用独立资料库和 UUID，不再根据目录数量决定编号，也不会覆盖旧的 `ArchiveFile…`。
 

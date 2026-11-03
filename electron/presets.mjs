@@ -15,9 +15,9 @@ export async function makePresets(platform = process.platform, home = os.homedir
   // 只有在 Windows 上才知道 Windows 用户目录；其他系统留空，避免生成 /Users/x/AppData 这类无效路径。
   const windowsHome = (...parts) => platform === 'win32' ? path.win32.join(home, ...parts) : '';
   const specs = [
-    { id: 'elden-ring', name: '艾尔登法环', subtitle: 'ELDEN RING', icon: 'ring', color: '#8a9270', folder: 'EldenRing', root: windowsHome('AppData', 'Roaming', 'EldenRing'), items: ['76561198132913813'] },
+    { id: 'elden-ring', name: '艾尔登法环', subtitle: 'ELDEN RING', icon: 'ring', color: '#8a9270', folder: 'EldenRing', root: windowsHome('AppData', 'Roaming', 'EldenRing'), items: [] },
     { id: 'slay-the-spire', name: '杀戮尖塔', subtitle: 'SLAY THE SPIRE', icon: 'spire', color: '#729486', folder: 'SlayTheSpire', root: 'D:\\Steam\\steamapps\\common\\SlayTheSpire', items: ['betaPreferences', 'preferences', 'saves'] },
-    { id: 'dark-souls-2', name: '黑暗之魂 II', subtitle: 'DARK SOULS II', icon: 'flame', color: '#a28167', folder: 'DarkSouls2', root: windowsHome('AppData', 'Roaming', 'DarkSoulsII'), items: ['011000010a4a6695'] },
+    { id: 'dark-souls-2', name: '黑暗之魂 II', subtitle: 'DARK SOULS II', icon: 'flame', color: '#a28167', folder: 'DarkSouls2', root: windowsHome('AppData', 'Roaming', 'DarkSoulsII'), items: [] },
   ];
   return Promise.all(specs.map(async spec => {
     const legacyRoot = path.join(home, 'Desktop', spec.folder);
