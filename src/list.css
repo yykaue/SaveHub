@@ -1,5 +1,5 @@
-.theme-shortcut { min-height: 32px; padding: 5px 8px; border-radius: var(--radius-sm); }
-.theme-shortcut:hover, .theme-shortcut.is-open { background: var(--accent-soft); color: var(--accent); }
+.theme-shortcut, .language-shortcut { min-height: 32px; padding: 5px 8px; border-radius: var(--radius-sm); }
+.theme-shortcut:hover, .theme-shortcut.is-open, .language-shortcut:hover { background: var(--accent-soft); color: var(--accent); }
 .theme-shortcut > svg:last-child { transition: transform .2s ease; }
 .theme-shortcut.is-open > svg:last-child { transform: rotate(180deg); }
 .route-content { view-transition-name: page-content; }

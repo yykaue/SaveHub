@@ -892,8 +892,14 @@ test('game removal, snapshot trash, favorites and theme choices persist and are 
   await store.updateSnapshot(id, snapshot.id, { favorite: true });
   await store.removeGame(id);
   await store.setTheme('glass');
+  assert.equal((await store.state()).language, 'zh');
+  await store.setLanguage('en');
+  await assert.rejects(store.setLanguage('fr'), /Unknown language/);
   const reopened = await new SaveStore(store.dataDir).init();
   assert.equal((await reopened.state()).theme, 'glass');
+  assert.equal((await reopened.state()).language, 'en');
+  await reopened.setLanguage('zh');
+  assert.equal((await reopened.state()).language, 'zh');
   assert.throws(() => reopened.game(id), /找不到/);
   await reopened.removeGame(id, true);
   const restored = (await reopened.snapshots(id))[0];

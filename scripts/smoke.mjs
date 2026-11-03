@@ -148,6 +148,14 @@ try {
   await page.getByRole('button', { name: '找回项目', exact: true }).click();
   await expect(page.getByRole('button', { name: /自动化测试游戏 0 份存档/ })).toBeVisible();
   checks.push('Native directory picker, custom image import, dual-platform configuration, game removal and recovery');
+  await page.getByRole('button', { name: 'English', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.getByRole('button', { name: /^Save Library/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Switch language', exact: true })).toHaveText('EN');
+  await page.getByRole('button', { name: 'Switch language', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  await expect(page.getByRole('button', { name: /^存档库/ })).toBeVisible();
+  checks.push('Bilingual Chinese/English switching from Settings and toolbar (default Chinese)');
 
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1080, 760));
   await page.getByRole('button', { name: /^存档库/ }).click();
@@ -159,6 +167,7 @@ try {
   const reopened = await new SaveStore(dataDir).init();
   const persisted = await reopened.state();
   assert.equal(persisted.theme, 'ink');
+  assert.equal(persisted.language, 'zh');
   const custom = persisted.games.find(game => game.name === '自动化测试游戏');
   assert(custom && !custom.deletedAt && custom.icon.startsWith('data:image/png;base64,'));
   assert.equal(custom.locations.darwin.root, '/Users/example/Library/Application Support/Test');

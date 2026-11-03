@@ -1,5 +1,7 @@
 # SaveHub
 
+简体中文 | [English](README.en.md)
+
 珍藏每一次冒险。一个基于 **Electron + React + TypeScript** 的本地游戏存档管理器，支持 Windows 与 macOS Apple Silicon。
 
 ## 开始使用
@@ -46,6 +48,7 @@ Windows：打开 `release/1.1.4/win-unpacked/SaveHub.exe`，或使用 `release/1
 - 读档恢复点支持多选、全选后移除；回收站和已移除的恢复点支持多选、全选后找回或永久删除。永久删除须二次确认，真实移除磁盘文件，无法找回。
 - 移除游戏保留所有备份，可在设置中找回。
 - 四种持久化主题：宣纸水墨、通透科技、霓虹赛博朋克、磨砂玻璃。右上角为唯一主题入口；再次点击返回上次页面，保留游戏、筛选、搜索、排序、勾选和滚动位置。
+- 支持简体中文与英文（English）双语界面切换，默认中文；可在右上角工具栏或「设置与关于」中切换并持久化保存。
 - 路由、筛选、排序、主题与弹窗变化带过渡效果；遵循系统的减少动态效果设置。
 - 本地文件处理，不需要账号或服务器。不会自动同步、定时备份或检测游戏进程。
 
@@ -106,7 +109,7 @@ Windows：打开 `release/1.1.4/win-unpacked/SaveHub.exe`，或使用 `release/1
 
 ```text
 SaveHub/
-  library.json                    游戏资料和主题
+  library.json                    游戏资料、主题与界面语言
   library.json.previous           上一次配置
   vault/<game-id>/
     game.json                     自定义游戏资料
@@ -178,7 +181,8 @@ electron/storage.mjs       备份、完整恢复、校验、事务回滚、导�
 electron/presets.mjs       三个游戏的脚本字面量解析与预设
 electron/main.mjs          Electron 窗口、原生对话框、IPC 权限边界
 electron/preload.cjs       最小化、明确列举的 renderer API
-src/App.tsx               游戏库、存档时光轴、编辑表单与主题选择
+src/App.tsx               游戏库、存档时光轴、编辑表单、主题与语言选择
+src/format.ts             中英双语文案、时间与文件大小格式化
 src/SnapshotList.tsx      标记视图、复选、批量操作与表头排序
 src/RestorePoints.tsx     恢复点与已移除恢复点的选择、找回及删除
 src/ImportDialog.tsx      重复导入的逐项处理选择、批量设置及结果

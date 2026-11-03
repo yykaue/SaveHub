@@ -1,4 +1,5 @@
 export type Theme = 'ink' | 'tech' | 'cyber' | 'glass';
+export type Language = 'zh' | 'en';
 export type Platform = 'win32' | 'darwin';
 export interface Location { root: string; items: string[] }
 export interface Snapshot {
@@ -14,7 +15,7 @@ export interface Game extends GameInput {
   id: string; createdAt: string; deletedAt?: string; snapshots: Snapshot[]; restorePoints: Snapshot[];
   pathStatus: 'ready' | 'unconfigured' | 'missing'; legacyCount: number;
 }
-export interface AppState { games: Game[]; theme: Theme; platform: Platform; dataDir: string; recoveryMessages: string[]; version: string }
+export interface AppState { games: Game[]; theme: Theme; language: Language; platform: Platform; dataDir: string; recoveryMessages: string[]; version: string }
 export interface Progress { phase: string; detail: string; completed: number; total?: number }
 export type ImportAction = 'overwrite' | 'skip' | 'keep-both';
 export interface ImportDecision { itemId: string; action: ImportAction; targetId?: string }
@@ -26,6 +27,7 @@ export interface ExportResult { folder: string; count: number }
 export interface Bridge {
   state(): Promise<AppState>;
   setTheme(theme: Theme): Promise<void>;
+  setLanguage(language: Language): Promise<void>;
   saveGame(game: GameInput): Promise<string>;
   removeGame(id: string, undo?: boolean): Promise<void>;
   pickDirectory(): Promise<string | null>;

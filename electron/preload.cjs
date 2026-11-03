@@ -7,6 +7,7 @@ const invoke = async (method, ...args) => {
 contextBridge.exposeInMainWorld('savehub', {
   state: () => invoke('state'),
   setTheme: theme => invoke('setTheme', theme),
+  setLanguage: language => invoke('setLanguage', language),
   saveGame: game => invoke('saveGame', game),
   removeGame: (id, undo) => invoke('removeGame', id, undo),
   pickDirectory: () => invoke('pickDirectory'),
