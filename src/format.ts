@@ -1,17 +1,6 @@
-import {
-  DEFAULT_LANGUAGE,
-  getDictionary,
-  getLanguage,
-  getLanguageMeta,
-  setLanguage,
-  t,
-} from './i18n';
+import { DEFAULT_LANGUAGE, getDictionary, getLanguage, getLanguageMeta, t } from './i18n';
 import type { Language, Snapshot } from './types';
 
-export const setFormatLanguage = setLanguage;
-export const getFormatLanguage = getLanguage;
-
-export const kinds: Record<Snapshot['kind'], string> = getDictionary(DEFAULT_LANGUAGE).format.kinds;
 export const kindLabel = (kind: Snapshot['kind'], language: Language = getLanguage()) =>
   getDictionary(language).format.kinds[kind];
 

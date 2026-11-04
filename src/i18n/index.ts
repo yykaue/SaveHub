@@ -41,9 +41,18 @@ export function normalizeLanguage(value?: string | null): Language {
 let currentLanguage: Language = normalizeLanguage(
   typeof localStorage !== 'undefined' ? localStorage.getItem('savehub-language') : DEFAULT_LANGUAGE,
 );
+const listeners = new Set<() => void>();
+
+export function subscribeLanguage(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 export function setLanguage(language: Language) {
-  currentLanguage = normalizeLanguage(language);
+  const next = normalizeLanguage(language);
+  if (next === currentLanguage) return;
+  currentLanguage = next;
+  listeners.forEach(listener => listener());
 }
 
 export function getLanguage(): Language {
@@ -86,4 +95,3 @@ export function t(
 export function getDictionary(language: Language = currentLanguage): TranslationSchema {
   return locales[normalizeLanguage(language)] ?? locales[DEFAULT_LANGUAGE];
 }
-

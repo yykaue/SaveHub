@@ -53,7 +53,7 @@ export interface Bridge {
   cancelImport(planId: string): Promise<void>;
   exportSnapshot(gameId: string, id: string): Promise<string | null>;
   exportSnapshots(gameId: string, ids: string[] | 'all'): Promise<ExportResult | null>;
-  openFolder(kind: 'vault' | 'game' | 'snapshots', id?: string): Promise<void>;
+  openFolder(kind: 'vault' | 'logs' | 'game' | 'snapshots', id?: string): Promise<void>;
   onProgress(callback: (progress: Progress | null) => void): () => void;
 }
 declare global { interface Window { savehub?: Bridge } }

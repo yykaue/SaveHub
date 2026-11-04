@@ -10,6 +10,8 @@ const zh = {
     bootLoading: '正在打开你的存档库…',
     closeNotification: '关闭提示',
     preparingProgress: '正在准备，请稍候…',
+    errorBoundaryTitle: '界面暂时遇到问题',
+    errorBoundaryDesc: '已保存的存档仍在本地资料库中。',
   },
   sidebar: {
     homeAria: 'SaveHub 首页',

@@ -33,10 +33,10 @@ SaveHub was designed with compatibility for legacy `save.sh` / `load.sh` backup 
 | Game | Original Script Root Directory (`target`) | Backup Items (`array`) |
 | --- | --- | --- |
 | Slay the Spire | `D:\Steam\steamapps\common\SlayTheSpire` | `betaPreferences`, `preferences`, `saves` |
-| Elden Ring | `%USERPROFILE%\AppData\Roaming\EldenRing` | `Steam Account ID` (`Steam账户ID`) |
-| Dark Souls II | `%USERPROFILE%\AppData\Roaming\DarkSoulsII` | `Steam Account ID` (`Steam账户ID`) |
+| Elden Ring | `%USERPROFILE%\AppData\Roaming\EldenRing` | `Steam Account ID` (`Steam ID`) |
+| Dark Souls II | `%USERPROFILE%\AppData\Roaming\DarkSoulsII` | `Steam Account ID` (`Steam ID`) |
 
-On first launch on Windows, SaveHub attempts to read `save.sh` from matching folders on the user's Desktop, parsing only literal values for `source` / `target` / `array`—**it never executes the script**. When no script is found, the root directory presets above are used; Elden Ring and Dark Souls II do not prefill an account folder, so you should enter your own `Steam Account ID` (`Steam账户ID`) directory in **Game Settings**. All paths and account directories can be manually edited.
+On first launch on Windows, SaveHub attempts to read `save.sh` from matching folders on the user's Desktop, parsing only literal values for `source` / `target` / `array`—**it never executes the script**. When no script is found, the root directory presets above are used; Elden Ring and Dark Souls II do not prefill an account folder, so you should enter your own `Steam Account ID` (`Steam ID`) directory in **Game Settings**. All paths and account directories can be manually edited.
 
 The `source` variable in legacy scripts corresponds to the legacy backup folder. New saves created by SaveHub use an isolated vault and UUIDs rather than numbering folders by count, and will never overwrite legacy `ArchiveFile…` directories.
 

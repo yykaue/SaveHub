@@ -1,289 +1,300 @@
 import path from 'node:path';
-import { createReadStream } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import { setTimeout as delay } from 'node:timers/promises';
-import { DEFAULT_LANGUAGE, LANGUAGES, normalizeLanguage, translate } from './i18n.mjs';
-import { normalizeGame, removeGame, purgeGame, purgeGameSnapshots, exportGames, prepareGameImport, reviewGameImport, executeGameImport } from './game-transfer.mjs';
+import { DEFAULT_LANGUAGE, LANGUAGES, normalizeLanguage, setBackendLanguage, translate } from './i18n.mjs';
+import {
+  EXPORT_INDEX,
+  assertDiskSpace,
+  assertNoLinks,
+  assertTreeNoLinks,
+  atomicJson,
+  cleanItems,
+  commitSnapshotDirectory,
+  copyRecords,
+  equal,
+  exportName,
+  fingerprint,
+  foldedName,
+  inventory,
+  missing,
+  publicSnapshot,
+  safeId,
+  signature,
+  statBigIntMaybe,
+  statMaybe,
+  uniqueExportName,
+  validateManifest,
+  within,
+} from './fs-utils.mjs';
+import {
+  executeGameImport,
+  exportGames,
+  normalizeGame,
+  prepareGameImport,
+  purgeGame,
+  purgeGameSnapshots,
+  removeGame,
+  reviewGameImport,
+} from './game-transfer.mjs';
+import { Logger } from './logger.mjs';
 
-export { LANGUAGES };
+export {
+  LANGUAGES,
+  assertDiskSpace,
+  assertNoLinks,
+  assertTreeNoLinks,
+  atomicJson,
+  cleanItems,
+  commitSnapshotDirectory,
+  equal,
+  exportName,
+  fingerprint,
+  foldedName,
+  inventory,
+  safeId,
+  statMaybe,
+  uniqueExportName,
+  within,
+};
 export const THEMES = ['ink', 'tech', 'cyber', 'glass'];
-const ID = /^[a-z0-9-]{1,64}$/;
-const MAX_FILES = 100000;
-const EXPORT_INDEX = '.savehub-exports';
-const missing = error => error?.code === 'ENOENT';
-const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-
-export function safeId(value) {
-  if (typeof value !== 'string' || !ID.test(value)) throw new Error('无效的项目或存档标识。');
-  return value;
-}
-
-export function cleanItems(values, { allowEmpty = false } = {}) {
-  if (!Array.isArray(values) || values.length > 128) throw new Error('请配置 1–128 个存档文件或目录。');
-  const items = values.map(value => {
-    if (typeof value !== 'string') throw new Error('存档路径必须是文本。');
-    const item = value.trim().replaceAll('\\', '/');
-    if (!item || item.length > 1024 || item.split('/').some(part => !part || part === '.' || part === '..' || /[<>:"|?*\x00-\x1f]/.test(part) || /[. ]$/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) {
-      throw new Error(`路径不安全或无法跨平台使用：${value}。请填写根目录下的相对路径。`);
-    }
-    return item;
-  });
-  if (!allowEmpty && !items.length) throw new Error('至少指定一个需要备份的文件或目录。');
-  const folded = items.map(item => item.toLowerCase());
-  if (folded.some((item, i) => folded.some((other, j) => i !== j && (item === other || item.startsWith(`${other}/`))))) {
-    throw new Error('存档路径不能重复，也不能同时包含父目录和它的子路径。');
-  }
-  return items;
-}
-
-export function within(root, target) {
-  const relative = path.relative(path.resolve(root), path.resolve(target));
-  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
-}
-
-async function statMaybe(file) { try { return await fs.lstat(file); } catch (error) { if (missing(error)) return null; throw error; } }
-
-async function assertTreeNoLinks(directory) {
-  await assertNoLinks(directory);
-  if (!(await statMaybe(directory))) return;
-  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-    const file = path.join(directory, entry.name);
-    if (entry.isSymbolicLink()) throw new Error('永久删除前发现符号链接或目录联接，操作已停止。');
-    if (entry.isDirectory()) await assertTreeNoLinks(file);
-  }
-}
-
-export async function commitSnapshotDirectory(source, destination, { platform = process.platform, rename = fs.rename, pause = delay } = {}) {
-  for (let attempt = 0; ; attempt++) {
-    try { await rename(source, destination); return; }
-    catch (error) {
-      // Windows can briefly hold a newly written backup directory open. Retry only
-      // this final commit, with a bounded delay; do not retry over an existing target.
-      if (platform !== 'win32' || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) || attempt >= 4 || await statMaybe(destination)) throw error;
-      await pause(50 * (attempt + 1));
-    }
-  }
-}
-
-export async function assertNoLinks(file) {
-  const resolved = path.resolve(file);
-  const parsed = path.parse(resolved);
-  let cursor = parsed.root;
-  for (const segment of resolved.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
-    cursor = path.join(cursor, segment);
-    const stat = await statMaybe(cursor);
-    if (stat?.isSymbolicLink()) throw new Error(`为避免操作到其他目录，不支持符号链接或目录联接：${cursor}`);
-  }
-}
-
-async function hashFile(file) {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(file)) hash.update(chunk);
-  return hash.digest('hex');
-}
-
-export async function atomicJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temp = `${file}.${randomUUID()}.tmp`;
-  try {
-    const handle = await fs.open(temp, 'wx');
-    try { await handle.writeFile(JSON.stringify(value, null, 2), 'utf8'); await handle.sync(); } finally { await handle.close(); }
-    await fs.rename(temp, file);
-  } finally { await fs.rm(temp, { force: true }).catch(() => {}); }
-}
-
-export async function inventory(root, entries, { allowMissing = false, progress = () => {} } = {}) {
-  const records = [], absent = [];
-  const walk = async relative => {
-    if (records.length >= MAX_FILES) throw new Error('单份存档超过 100,000 个文件或目录，请缩小备份范围。');
-    const file = path.join(root, ...relative.split('/'));
-    const stat = await fs.lstat(file);
-    if (stat.isSymbolicLink()) throw new Error(`不支持符号链接或目录联接：${relative}`);
-    if (stat.isDirectory()) {
-      records.push({ path: relative, type: 'directory', mtimeMs: stat.mtimeMs });
-      const names = (await fs.readdir(file)).sort();
-      for (const name of names) {
-        // Validate filenames too, so a backup made on one OS is safe on the other.
-        cleanItems([name]);
-        await walk(`${relative}/${name}`);
-      }
-    } else if (stat.isFile()) {
-      const sha256 = await hashFile(file);
-      const after = await fs.lstat(file);
-      if (stat.size !== after.size || stat.mtimeMs !== after.mtimeMs) throw new Error(`文件正在变化，请先关闭游戏：${relative}`);
-      records.push({ path: relative, type: 'file', size: stat.size, mtimeMs: stat.mtimeMs, sha256 });
-      progress({ phase: 'checking', detail: relative, completed: records.length });
-    } else throw new Error(`不支持的文件类型：${relative}`);
-  };
-  for (const entry of entries) {
-    await assertNoLinks(path.join(root, entry));
-    if (!(await statMaybe(path.join(root, entry)))) {
-      if (!allowMissing) throw new Error(`找不到存档路径：${entry}。请检查游戏配置，或先在游戏中创建一次存档。`);
-      absent.push(entry);
-    } else await walk(entry);
-  }
-  records.sort((a, b) => a.path.localeCompare(b.path, 'en'));
-  return { records, absent };
-}
-
-const signature = value => JSON.stringify({ absent: value.absent, records: value.records.map(({ path: file, type, size, sha256 }) => ({ path: file, type, size, sha256 })) });
-const fingerprint = value => createHash('sha256').update(signature(value)).digest('hex');
-
-async function copyRecords(source, target, records, progress = () => {}) {
-  await fs.mkdir(target, { recursive: true });
-  const dirs = records.filter(record => record.type === 'directory').sort((a, b) => a.path.length - b.path.length);
-  for (const record of dirs) await fs.mkdir(path.join(target, record.path), { recursive: true });
-  const files = records.filter(record => record.type === 'file');
-  let completed = 0;
-  for (const record of files) {
-    const dest = path.join(target, record.path);
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.copyFile(path.join(source, record.path), dest, fs.constants.COPYFILE_EXCL);
-    const date = new Date(record.mtimeMs);
-    await fs.utimes(dest, date, date);
-    progress({ phase: 'copying', completed: ++completed, total: files.length, detail: record.path });
-  }
-  for (const record of dirs.reverse()) {
-    const date = new Date(record.mtimeMs);
-    await fs.utimes(path.join(target, record.path), date, date);
-  }
-}
-
-function validateManifest(meta) {
-  safeId(meta.id); safeId(meta.gameId);
-  if (meta.version !== 1 || typeof meta.label !== 'string' || !Array.isArray(meta.records) || meta.records.length > MAX_FILES) throw new Error('存档清单格式无效。');
-  const entries = cleanItems(meta.entries);
-  if (!Array.isArray(meta.absent) || meta.absent.some(item => !entries.includes(item))) throw new Error('存档清单缺少有效的路径信息。');
-  const seen = new Set();
-  for (const record of meta.records) {
-    cleanItems([record.path]);
-    if (!entries.some(entry => record.path === entry || record.path.startsWith(`${entry}/`)) || meta.absent.some(entry => record.path === entry || record.path.startsWith(`${entry}/`))) throw new Error('存档清单包含范围外的文件。');
-    if (seen.has(record.path.toLowerCase())) throw new Error('存档包含重复或大小写冲突的文件。');
-    seen.add(record.path.toLowerCase());
-    if (!['file', 'directory'].includes(record.type) || !Number.isFinite(record.mtimeMs)) throw new Error('存档文件信息无效。');
-    if (record.type === 'file' && (!/^[a-f0-9]{64}$/.test(record.sha256) || !Number.isSafeInteger(record.size) || record.size < 0)) throw new Error('存档校验信息无效。');
-  }
-  return meta;
-}
-
-const publicSnapshot = ({ records, ...snapshot }) => snapshot;
-
-function exportName(label) {
-  let name = label.normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().replace(/[. ]+$/g, '');
-  // Leave room for collision suffixes on filesystems with a 255-byte name limit.
-  while (Buffer.byteLength(name, 'utf8') > 180) name = Array.from(name).slice(0, -1).join('');
-  name = name.replace(/[. ]+$/g, '') || '未命名存档';
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name) || name.toLowerCase().startsWith('.savehub-export')) name = `_${name}`;
-  return name;
-}
-
-const foldedName = name => name.normalize('NFC').toLowerCase();
-
-function uniqueExportName(base, taken) {
-  let name = base, suffix = 2;
-  while (taken.has(foldedName(name))) name = `${base} (${suffix++})`;
-  taken.add(foldedName(name));
-  return name;
-}
+export const DEFAULT_MAX_RESTORE_POINTS = 20;
 
 export class SaveStore {
-  constructor(dataDir, { platform = process.platform, onProgress = () => {}, fault = async () => {} } = {}) {
+  /**
+   * @param {string} dataDir
+   * @param {{ platform?: string; onProgress?: (p: any) => void; fault?: (phase: string, data?: any) => Promise<void>; maxRestorePoints?: number }} [options]
+   */
+  constructor(
+    dataDir,
+    { platform = process.platform, onProgress = () => {}, fault = async () => {}, maxRestorePoints = DEFAULT_MAX_RESTORE_POINTS } = {},
+  ) {
     this.dataDir = path.resolve(dataDir);
     this.vault = path.join(this.dataDir, 'vault');
     this.configFile = path.join(this.dataDir, 'library.json');
     this.platform = platform;
     this.onProgress = onProgress;
     this.fault = fault;
+    this.maxRestorePoints = maxRestorePoints;
     this.busy = false;
+    /** @type {any} */
+    this.config = null;
+    /** @type {any} */
     this.pendingImport = null;
+    /** @type {any} */
     this.pendingGameImport = null;
+    /** @type {string[]} */
     this.recoveryMessages = [];
+    /** @type {Map<string, { statSignature: string; meta: any }>} */
+    this.manifestCache = new Map();
+    this.logger = new Logger(this.dataDir);
   }
 
-  t(key, params) { return translate(this.config?.language, key, params); }
+  get lang() {
+    return this.config?.language;
+  }
 
+  /**
+   * @param {string} key
+   * @param {Record<string, string | number>} [params]
+   */
+  t(key, params) {
+    return translate(this.lang, key, params);
+  }
+
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   */
+  invalidateSnapshotCache(gameId, id) {
+    this.manifestCache.delete(`${gameId}/${id}`);
+  }
+
+  /**
+   * @param {string} gameId
+   */
+  invalidateGameCache(gameId) {
+    const prefix = `${gameId}/`;
+    for (const key of this.manifestCache.keys()) {
+      if (key.startsWith(prefix)) this.manifestCache.delete(key);
+    }
+  }
+
+  /**
+   * @param {any[]} [presets]
+   */
   async init(presets = []) {
     await assertNoLinks(this.dataDir);
     await fs.mkdir(this.vault, { recursive: true });
     try {
       this.config = JSON.parse(await fs.readFile(this.configFile, 'utf8'));
-      if (this.config.version !== 1 || !Array.isArray(this.config.games)) throw new Error('配置格式无效');
+      if (this.config.version !== 1 || !Array.isArray(this.config.games)) {
+        throw new Error(this.t('storage.invalidConfigFormat'));
+      }
       if (!LANGUAGES.includes(this.config.language)) this.config.language = DEFAULT_LANGUAGE;
-      this.config.games.forEach(game => safeId(game.id));
+      setBackendLanguage(this.config.language);
+      this.config.games.forEach((/** @type {any} */ game) => safeId(game.id, this.lang));
     } catch (error) {
-      if (!missing(error)) throw new Error(`无法读取游戏库。原文件已保留，请检查 ${this.configFile}：${error.message}`);
+      if (!missing(error)) {
+        const message = this.t('storage.corruptLibrary', {
+          file: this.configFile,
+          error: /** @type {Error} */ (error).message,
+        });
+        await this.logger.error('corrupt-library-config', { file: this.configFile, error: /** @type {Error} */ (error).message });
+        throw new Error(message);
+      }
       this.config = { version: 1, theme: 'ink', language: DEFAULT_LANGUAGE, games: presets };
+      setBackendLanguage(this.config.language);
       await this.saveConfig();
     }
     await this.recoverTransactions();
-    for (const game of this.config.games.filter(game => game.purgeGamePending || game.purgeSnapshotsPending)) {
+    for (const game of this.config.games.filter((/** @type {any} */ game) => game.purgeGamePending || game.purgeSnapshotsPending)) {
       // Older snapshot-only cleanup intents retain their original scope.
-      try { await (game.purgeGamePending ? purgeGame(this, game.id) : purgeGameSnapshots(this, game.id)); }
-      catch (error) { this.recoveryMessages.push(`游戏清理未完成，请在全部游戏中重试：${game.name}（${error.message}）`); }
+      try {
+        await (game.purgeGamePending ? purgeGame(this, game.id) : purgeGameSnapshots(this, game.id));
+      } catch (error) {
+        const errMessage = /** @type {Error} */ (error).message;
+        await this.logger.warn('pending-game-cleanup-incomplete', { gameId: game.id, error: errMessage });
+        this.recoveryMessages.push(this.t('storage.gameCleanupPendingRecovery', { name: game.name, error: errMessage }));
+      }
     }
     await this.recoverImportReplacements();
     return this;
   }
 
+  /**
+   * @template T
+   * @param {() => Promise<T>} action
+   * @returns {Promise<T>}
+   */
   async exclusive(action) {
-    if (this.busy) throw new Error('另一个存档操作正在进行，请稍候。');
+    if (this.busy) throw new Error(this.t('storage.operationBusy'));
     this.busy = true;
-    try { return await action(); } finally { this.busy = false; this.onProgress(null); }
+    try {
+      return await action();
+    } finally {
+      this.busy = false;
+      this.onProgress(null);
+    }
   }
 
+  /**
+   * @param {string} id
+   * @param {boolean} [includeDeleted]
+   */
   game(id, includeDeleted = false) {
-    safeId(id);
-    const game = this.config.games.find(item => item.id === id && (includeDeleted || !item.deletedAt));
-    if (!game) throw new Error('找不到这个游戏项目。');
+    safeId(id, this.lang);
+    const game = this.config.games.find((/** @type {any} */ item) => item.id === id && (includeDeleted || !item.deletedAt));
+    if (!game) throw new Error(this.t('storage.gameNotFound'));
     return game;
   }
 
-  gameDir(id) { return path.join(this.vault, safeId(id)); }
-  snapshotDir(gameId, id) { return path.join(this.gameDir(gameId), 'snapshots', safeId(id)); }
+  /**
+   * @param {string} id
+   */
+  gameDir(id) {
+    return path.join(this.vault, safeId(id, this.lang));
+  }
+
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   */
+  snapshotDir(gameId, id) {
+    return path.join(this.gameDir(gameId), 'snapshots', safeId(id, this.lang));
+  }
+
   async saveConfig() {
     if (await statMaybe(this.configFile)) await fs.copyFile(this.configFile, `${this.configFile}.previous`);
     await atomicJson(this.configFile, this.config);
   }
 
+  /**
+   * @param {string} gameId
+   * @param {boolean} [includeDeleted]
+   */
   async snapshots(gameId, includeDeleted = false) {
     const directory = path.join(this.gameDir(gameId), 'snapshots');
     const result = [];
     let entries;
-    try { entries = await fs.readdir(directory, { withFileTypes: true }); } catch (error) { if (missing(error)) return []; throw error; }
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (missing(error)) return [];
+      throw error;
+    }
     const ids = new Set(entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name));
     for (const entry of entries) {
       const match = entry.name.match(/^\.purge-([a-z0-9-]{1,64})\.json$/);
       if (match && entry.isFile()) ids.add(match[1]);
     }
-      for (const id of ids) {
+    for (const id of ids) {
       try {
         const meta = await this.readSnapshot(gameId, id);
         if (includeDeleted || !meta.deletedAt) result.push(publicSnapshot(meta));
       } catch (error) {
-        result.push({ id, gameId, label: this.t('storage.corruptedLabel', { id: id.slice(0, 8) }), kind: 'manual', corrupted: true, error: error.message, createdAt: '', bytes: 0, fileCount: 0, entries: [] });
+        result.push({
+          id,
+          gameId,
+          label: this.t('storage.corruptedLabel', { id: id.slice(0, 8) }),
+          kind: 'manual',
+          corrupted: true,
+          error: /** @type {Error} */ (error).message,
+          createdAt: '',
+          bytes: 0,
+          fileCount: 0,
+          entries: [],
+        });
       }
     }
     return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   async state() {
-    const games = await Promise.all(this.config.games.map(async game => {
-      const location = game.locations[this.platform];
-      let pathStatus = 'unconfigured';
-      if (location?.root && location?.items.length) {
-        try { await this.location(game); pathStatus = 'ready'; } catch { pathStatus = 'missing'; }
-      }
-      let legacyCount = 0;
-      if (game.legacyRoot) {
-        try { legacyCount = (await fs.readdir(game.legacyRoot, { withFileTypes: true })).filter(item => item.isDirectory() && item.name.startsWith('ArchiveFile')).length; } catch { /* Optional legacy folder. */ }
-      }
-      const stored = await this.snapshots(game.id, true);
-      return { ...game, snapshots: stored.filter(snapshot => snapshot.kind !== 'safety'), restorePoints: stored.filter(snapshot => snapshot.kind === 'safety'), pathStatus, legacyCount };
-    }));
-    return { games, theme: this.config.theme, language: normalizeLanguage(this.config.language), platform: this.platform, dataDir: this.dataDir, recoveryMessages: this.recoveryMessages };
+    const games = await Promise.all(
+      this.config.games.map(async (/** @type {any} */ game) => {
+        const location = game.locations[this.platform];
+        let pathStatus = 'unconfigured';
+        if (location?.root && location?.items.length) {
+          try {
+            await this.location(game);
+            pathStatus = 'ready';
+          } catch {
+            pathStatus = 'missing';
+          }
+        }
+        let legacyCount = 0;
+        if (game.legacyRoot) {
+          try {
+            legacyCount = (await fs.readdir(game.legacyRoot, { withFileTypes: true })).filter(
+              item => item.isDirectory() && item.name.startsWith('ArchiveFile'),
+            ).length;
+          } catch {
+            /* Optional legacy folder. */
+          }
+        }
+        const stored = await this.snapshots(game.id, true);
+        return {
+          ...game,
+          snapshots: stored.filter(snapshot => snapshot.kind !== 'safety'),
+          restorePoints: stored.filter(snapshot => snapshot.kind === 'safety'),
+          pathStatus,
+          legacyCount,
+        };
+      }),
+    );
+    return {
+      games,
+      theme: this.config.theme,
+      language: normalizeLanguage(this.config.language),
+      platform: this.platform,
+      dataDir: this.dataDir,
+      recoveryMessages: this.recoveryMessages,
+    };
   }
 
+  /**
+   * @param {string} theme
+   */
   async setTheme(theme) {
     return this.exclusive(async () => {
       if (!THEMES.includes(theme)) throw new Error(this.t('storage.unknownTheme'));
@@ -292,81 +303,142 @@ export class SaveStore {
     });
   }
 
+  /**
+   * @param {string} language
+   */
   async setLanguage(language) {
     return this.exclusive(async () => {
       if (!LANGUAGES.includes(language)) throw new Error(this.t('storage.unknownLanguage'));
       this.config.language = language;
+      setBackendLanguage(language);
       await this.saveConfig();
     });
   }
 
+  /**
+   * @param {any} input
+   */
   async upsertGame(input) {
     return this.exclusive(async () => {
-      const game = normalizeGame(input, input?.id ? this.game(input.id) : null);
+      const game = normalizeGame(input, input?.id ? this.game(input.id) : null, this.lang);
       await this.commitGame(game);
       return game.id;
     });
   }
 
+  /**
+   * @param {any} game
+   */
   async commitGame(game) {
     const previous = this.config;
-    const games = previous.games.filter(item => item.id !== game.id);
-    const index = previous.games.findIndex(item => item.id === game.id);
+    const games = previous.games.filter((/** @type {any} */ item) => item.id !== game.id);
+    const index = previous.games.findIndex((/** @type {any} */ item) => item.id === game.id);
     games.splice(index < 0 ? games.length : index, 0, game);
     this.config = { ...previous, games };
-    try { await this.saveConfig(); } catch (error) { this.config = previous; throw error; }
+    try {
+      await this.saveConfig();
+    } catch (error) {
+      this.config = previous;
+      throw error;
+    }
     // library.json is authoritative; a failed cache write cannot undo a committed game.
-    await atomicJson(path.join(this.gameDir(game.id), 'game.json'), game).catch(() => {});
+    await atomicJson(path.join(this.gameDir(game.id), 'game.json'), game).catch(err =>
+      this.logger.warn('game-cache-write-failed', { gameId: game.id, error: err.message }),
+    );
   }
 
+  /**
+   * @param {string} id
+   */
   async forgetGame(id) {
-    safeId(id);
+    safeId(id, this.lang);
     const previous = this.config;
-    this.config = { ...previous, games: previous.games.filter(game => game.id !== id) };
-    try { await this.saveConfig(); } catch (error) { this.config = previous; throw error; }
+    this.config = { ...previous, games: previous.games.filter((/** @type {any} */ game) => game.id !== id) };
+    try {
+      await this.saveConfig();
+    } catch (error) {
+      this.config = previous;
+      throw error;
+    }
   }
 
+  /**
+   * @param {string} id
+   * @param {boolean} [undo]
+   * @param {boolean} [deleteRecords]
+   */
   async removeGame(id, undo = false, deleteRecords = false) {
     return this.exclusive(() => removeGame(this, id, undo, deleteRecords));
   }
 
+  /**
+   * @param {string[]} ids
+   * @param {string} destination
+   * @param {boolean} [includeSnapshots]
+   */
   async exportGames(ids, destination, includeSnapshots = false) {
     return this.exclusive(() => exportGames(this, ids, destination, includeSnapshots));
   }
 
+  /**
+   * @param {string} directory
+   */
   async prepareGameImport(directory) {
     return this.exclusive(() => prepareGameImport(this, directory));
   }
 
+  /**
+   * @param {string} planId
+   * @param {any[]} decisions
+   */
   async reviewGameImport(planId, decisions) {
     return this.exclusive(() => reviewGameImport(this, planId, decisions));
   }
 
+  /**
+   * @param {string} planId
+   * @param {any[]} decisions
+   */
   async executeGameImport(planId, decisions) {
     return this.exclusive(() => executeGameImport(this, planId, decisions));
   }
 
+  /**
+   * @param {string} planId
+   */
   cancelGameImport(planId) {
     if (this.pendingGameImport?.id === planId) this.pendingGameImport = null;
   }
 
+  /**
+   * @param {any} game
+   * @param {string[]} [entriesOverride]
+   */
   async location(game, entriesOverride) {
     const location = game.locations[this.platform];
-    if (!location?.root || !path.isAbsolute(location.root)) throw new Error('请先配置当前系统的游戏存档根目录（绝对路径）。');
+    if (!location?.root || !path.isAbsolute(location.root)) {
+      throw new Error(this.t('storage.unconfiguredRoot'));
+    }
     const root = path.resolve(location.root);
-    if (root === path.parse(root).root) throw new Error('不能将磁盘根目录设为游戏存档目录。');
-    await assertNoLinks(root);
+    if (root === path.parse(root).root) throw new Error(this.t('storage.diskRootForbidden'));
+    await assertNoLinks(root, this.lang);
     const rootStat = await statMaybe(root);
-    if (!rootStat?.isDirectory()) throw new Error(`游戏目录不存在：${root}`);
-    const entries = cleanItems(entriesOverride || location.items);
+    if (!rootStat?.isDirectory()) throw new Error(this.t('storage.gameDirMissing', { root }));
+    const entries = cleanItems(entriesOverride || location.items, { lang: this.lang });
     for (const entry of entries) {
       const target = path.join(root, entry);
-      if (within(target, this.dataDir) || within(this.dataDir, target)) throw new Error('游戏存档路径与 SaveHub 资料库重叠，请重新选择目录。');
-      await assertNoLinks(target);
+      if (within(target, this.dataDir, this.platform) || within(this.dataDir, target, this.platform)) {
+        throw new Error(this.t('storage.overlapWithVault'));
+      }
+      await assertNoLinks(target, this.lang);
     }
     return { root, entries };
   }
 
+  /**
+   * @param {string} gameId
+   * @param {{ label?: string; note?: string }} [options]
+   */
   async createSnapshot(gameId, options = {}) {
     return this.exclusive(async () => {
       const game = this.game(gameId);
@@ -375,55 +447,119 @@ export class SaveStore {
     });
   }
 
-  async capture(game, root, entries, { label, note = '', kind = 'manual', allowMissing = false, origin, favorite = false, protected: protectedTag = false, expectedFingerprint, replace, metadata } = {}) {
-    if (typeof label !== 'string' || !label.trim() || label.length > 100) throw new Error('请填写 1–100 个字符的存档名称。');
-    if (typeof note !== 'string' || note.length > 2000) throw new Error('存档备注不能超过 2,000 个字符。');
-    await assertNoLinks(root);
-    const source = await inventory(root, entries, { allowMissing, progress: this.onProgress });
-    if (expectedFingerprint && fingerprint(source) !== expectedFingerprint) throw new Error('导入源在确认后发生变化，请重新选择目录并检查。');
+  /**
+   * @param {any} game
+   * @param {string} root
+   * @param {string[]} entries
+   * @param {any} [options]
+   */
+  async capture(
+    game,
+    root,
+    entries,
+    { label, note = '', kind = 'manual', allowMissing = false, origin, favorite = false, protected: protectedTag = false, expectedFingerprint, replace, metadata } = {},
+  ) {
+    if (typeof label !== 'string' || !label.trim() || label.length > 100) {
+      throw new Error(this.t('storage.labelLength'));
+    }
+    if (typeof note !== 'string' || note.length > 2000) {
+      throw new Error(this.t('storage.noteLength'));
+    }
+    await assertNoLinks(root, this.lang);
+    const source = await inventory(root, entries, { allowMissing, progress: this.onProgress, lang: this.lang });
+    if (expectedFingerprint && fingerprint(source) !== expectedFingerprint) {
+      throw new Error(this.t('storage.importSourceChangedAfterConfirm'));
+    }
+    const totalBytes = source.records.reduce((total, record) => total + (record.size || 0), 0);
+    await assertDiskSpace(this.vault, totalBytes, this.lang);
     const id = randomUUID();
     const stage = path.join(this.gameDir(game.id), 'snapshots', `.pending-${id}`);
     const destination = this.snapshotDir(game.id, id);
     try {
       await copyRecords(root, path.join(stage, 'payload'), source.records, this.onProgress);
-      const copied = await inventory(path.join(stage, 'payload'), entries, { allowMissing: true });
-      const sourceAfter = await inventory(root, entries, { allowMissing });
-      if (signature(source) !== signature(copied) || signature(source) !== signature(sourceAfter)) throw new Error('备份期间文件发生变化或复制校验失败。请关闭游戏后重试，本次备份未提交。');
+      const copied = await inventory(path.join(stage, 'payload'), entries, { allowMissing: true, lang: this.lang });
+      const sourceAfter = await inventory(root, entries, { allowMissing, lang: this.lang });
+      if (signature(source) !== signature(copied) || signature(source) !== signature(sourceAfter)) {
+        throw new Error(this.t('storage.backupChangedOrVerifyFailed'));
+      }
       const meta = {
-        version: 1, id, gameId: game.id, label: label.trim(), note: note.trim(), kind,
-        createdAt: new Date().toISOString(), platform: this.platform, entries, favorite: Boolean(favorite), protected: Boolean(protectedTag),
-        records: source.records, absent: source.absent, fingerprint: fingerprint(source),
+        version: 1,
+        id,
+        gameId: game.id,
+        label: label.trim(),
+        note: note.trim(),
+        kind,
+        createdAt: new Date().toISOString(),
+        platform: this.platform,
+        entries,
+        favorite: Boolean(favorite),
+        protected: Boolean(protectedTag),
+        records: source.records,
+        absent: source.absent,
+        fingerprint: fingerprint(source),
         fileCount: source.records.filter(record => record.type === 'file').length,
-        bytes: source.records.reduce((total, record) => total + (record.size || 0), 0),
+        bytes: totalBytes,
         ...(origin ? { origin } : {}),
         ...(metadata || {}),
         ...(replace ? { id: replace.id, createdAt: replace.createdAt, favorite: replace.favorite, protected: replace.protected } : {}),
       };
-      validateManifest(meta);
+      validateManifest(meta, this.lang);
       await atomicJson(path.join(stage, 'manifest.json'), meta);
-      if (replace) await this.replaceImportedSnapshot(game.id, replace, stage, id);
-      else await commitSnapshotDirectory(stage, destination);
+      if (replace) {
+        await this.replaceImportedSnapshot(game.id, replace, stage, id);
+        this.invalidateSnapshotCache(game.id, replace.id);
+      } else {
+        await commitSnapshotDirectory(stage, destination);
+        this.invalidateSnapshotCache(game.id, id);
+      }
       return meta;
     } finally {
       // A pending replacement journal owns its stage until rollback/recovery finishes.
-      if (!replace || !(await statMaybe(path.join(this.dataDir, 'import-transactions', `${id}.json`)))) await fs.rm(stage, { recursive: true, force: true }).catch(() => {});
+      if (!replace || !(await statMaybe(path.join(this.dataDir, 'import-transactions', `${id}.json`)))) {
+        await fs.rm(stage, { recursive: true, force: true }).catch(err =>
+          this.logger.warn('capture-stage-cleanup-failed', { stage, error: err.message }),
+        );
+      }
     }
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   */
   async readSnapshot(gameId, id) {
     const folder = this.snapshotDir(gameId, id);
-    await assertNoLinks(folder);
+    await assertNoLinks(folder, this.lang);
     const marker = path.join(path.dirname(folder), `.purge-${id}.json`);
-    await assertNoLinks(marker);
-    const pending = Boolean(await statMaybe(marker));
+    await assertNoLinks(marker, this.lang);
+    const markerStat = await statBigIntMaybe(marker);
+    const pending = Boolean(markerStat);
     const file = pending ? marker : path.join(folder, 'manifest.json');
-    await assertNoLinks(file);
-    const meta = validateManifest(JSON.parse(await fs.readFile(file, 'utf8')));
-    if (meta.id !== id || meta.gameId !== gameId) throw new Error('存档身份不一致，操作已停止。');
-    if (pending && (!meta.deletedAt || !meta.purgePending)) throw new Error('永久删除记录无效，操作已停止。');
+    await assertNoLinks(file, this.lang);
+    const fileStat = pending ? markerStat : await statBigIntMaybe(file);
+    const cacheKey = `${gameId}/${id}`;
+    const statSignature = fileStat
+      ? `${pending ? 'p' : 'm'}:${fileStat.ino}:${fileStat.size}:${fileStat.mtimeNs}:${fileStat.ctimeNs}`
+      : '';
+    if (statSignature) {
+      const cached = this.manifestCache.get(cacheKey);
+      if (cached && cached.statSignature === statSignature) {
+        return structuredClone(cached.meta);
+      }
+    }
+    const meta = validateManifest(JSON.parse(await fs.readFile(file, 'utf8')), this.lang);
+    if (meta.id !== id || meta.gameId !== gameId) throw new Error(this.t('storage.snapshotIdentityMismatch'));
+    if (pending && (!meta.deletedAt || !meta.purgePending)) throw new Error(this.t('storage.invalidPurgeRecord'));
+    if (statSignature) {
+      this.manifestCache.set(cacheKey, { statSignature, meta: structuredClone(meta) });
+    }
     return meta;
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   */
   async verifySnapshot(gameId, id) {
     return this.exclusive(async () => {
       const meta = await this.verify(gameId, id);
@@ -431,77 +567,135 @@ export class SaveStore {
     });
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   */
   async verify(gameId, id) {
     const meta = await this.readSnapshot(gameId, id);
-    if (meta.purgePending) throw new Error('这份记录已开始永久删除，只能继续清理，不能读取或导出。');
-    const actual = await inventory(path.join(this.snapshotDir(gameId, id), 'payload'), meta.entries, { allowMissing: true, progress: this.onProgress });
-    if (signature(actual) !== signature(meta)) throw new Error('存档完整性校验失败：文件缺失或内容已改变。游戏文件未被覆盖。');
+    if (meta.purgePending) throw new Error(this.t('storage.cannotReadPurging'));
+    const actual = await inventory(path.join(this.snapshotDir(gameId, id), 'payload'), meta.entries, {
+      allowMissing: true,
+      progress: this.onProgress,
+      lang: this.lang,
+    });
+    if (signature(actual) !== signature(meta)) {
+      throw new Error(this.t('storage.integrityCheckFailed'));
+    }
     return meta;
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   * @param {any} changes
+   */
   async updateSnapshot(gameId, id, changes) {
     return this.exclusive(async () => {
       this.game(gameId);
       const meta = await this.readSnapshot(gameId, id);
-      if (meta.purgePending) throw new Error('这份记录已开始永久删除，不能找回或修改，请继续永久删除。');
-      if (changes.deleted && (meta.protected || changes.protected)) throw new Error('保护存档不可删除，请先取消保护标记。');
+      if (meta.purgePending) throw new Error(this.t('storage.cannotModifyPurging'));
+      if (changes.deleted && (meta.protected || changes.protected)) {
+        throw new Error(this.t('storage.protectedCannotDelete'));
+      }
       if ('label' in changes) {
-        if (typeof changes.label !== 'string' || !changes.label.trim() || changes.label.length > 100) throw new Error('存档名称需要 1–100 个字符。');
+        if (typeof changes.label !== 'string' || !changes.label.trim() || changes.label.length > 100) {
+          throw new Error(this.t('storage.updateLabelLength'));
+        }
         meta.label = changes.label.trim();
       }
       if ('note' in changes) {
-        if (typeof changes.note !== 'string' || changes.note.length > 2000) throw new Error('备注不能超过 2,000 个字符。');
+        if (typeof changes.note !== 'string' || changes.note.length > 2000) {
+          throw new Error(this.t('storage.updateNoteLength'));
+        }
         meta.note = changes.note;
       }
       if ('favorite' in changes) meta.favorite = Boolean(changes.favorite);
       if ('protected' in changes) {
-        if (meta.kind === 'safety') throw new Error('自动恢复点不能作为普通存档标记。');
-        if (meta.deletedAt) throw new Error('请先从回收站找回存档，再修改保护标记。');
+        if (meta.kind === 'safety') throw new Error(this.t('storage.safetyCannotProtect'));
+        if (meta.deletedAt) throw new Error(this.t('storage.recoverBeforeProtect'));
         meta.protected = Boolean(changes.protected);
       }
-      if ('deleted' in changes) { if (changes.deleted) meta.deletedAt = new Date().toISOString(); else delete meta.deletedAt; }
+      if ('deleted' in changes) {
+        if (changes.deleted) meta.deletedAt = new Date().toISOString();
+        else delete meta.deletedAt;
+      }
       await atomicJson(path.join(this.snapshotDir(gameId, id), 'manifest.json'), meta);
+      this.invalidateSnapshotCache(gameId, id);
     });
   }
 
+  /**
+   * @param {unknown} ids
+   * @returns {string[]}
+   */
   validateSelection(ids) {
-    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 10000) throw new Error('请选择 1–10,000 份存档。');
-    const unique = [...new Set(ids.map(safeId))];
-    if (unique.length !== ids.length) throw new Error('选择的存档不能重复。');
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 10000) {
+      throw new Error(this.t('storage.selectionCountRange'));
+    }
+    const unique = [...new Set(ids.map(id => safeId(id, this.lang)))];
+    if (unique.length !== ids.length) throw new Error(this.t('storage.duplicateSelection'));
     return unique;
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string[] | 'all'} selection
+   * @param {any} changes
+   */
   async updateSnapshots(gameId, selection, changes) {
     return this.exclusive(async () => {
       this.game(gameId);
       const keys = Object.keys(changes || {});
-      if (keys.length !== 1 || !['deleted', 'protected'].includes(keys[0]) || typeof changes[keys[0]] !== 'boolean') throw new Error('不支持的批量标记操作。');
-      if (selection === 'all' && keys[0] !== 'protected') throw new Error('全部记录仅支持批量保护或取消保护。');
-      const ids = selection === 'all' ? (await this.snapshots(gameId)).filter(meta => meta.kind !== 'safety').map(meta => meta.id) : selection;
+      if (keys.length !== 1 || !['deleted', 'protected'].includes(keys[0]) || typeof changes[keys[0]] !== 'boolean') {
+        throw new Error(this.t('storage.unsupportedBatchMark'));
+      }
+      if (selection === 'all' && keys[0] !== 'protected') {
+        throw new Error(this.t('storage.allSelectionOnlyProtect'));
+      }
+      const ids =
+        selection === 'all'
+          ? (await this.snapshots(gameId)).filter(meta => meta.kind !== 'safety').map(meta => meta.id)
+          : selection;
       if (selection === 'all' && ids.length === 0) return { updated: [], failed: [] };
       const selected = this.validateSelection(ids);
       // Validate ownership and every manifest before changing the first item.
       const metas = [];
       for (const id of selected) metas.push(await this.readSnapshot(gameId, id));
-      if (metas.some(meta => meta.purgePending)) throw new Error('所选记录包含尚未完成永久删除的项目，不能找回或修改。');
-      if (changes.deleted && metas.some(meta => meta.protected)) throw new Error('所选记录中有保护存档，请先取消保护标记后再删除。');
-      if ('protected' in changes && metas.some(meta => meta.kind === 'safety')) throw new Error('自动恢复点不能作为普通存档标记。');
-      if ('protected' in changes && metas.some(meta => meta.deletedAt)) throw new Error('所选记录包含回收站存档，请先找回，再修改保护标记。');
+      if (metas.some(meta => meta.purgePending)) throw new Error(this.t('storage.batchContainsPurging'));
+      if (changes.deleted && metas.some(meta => meta.protected)) {
+        throw new Error(this.t('storage.batchContainsProtected'));
+      }
+      if ('protected' in changes && metas.some(meta => meta.kind === 'safety')) {
+        throw new Error(this.t('storage.safetyCannotProtect'));
+      }
+      if ('protected' in changes && metas.some(meta => meta.deletedAt)) {
+        throw new Error(this.t('storage.batchContainsTrashForProtect'));
+      }
+      /** @type {{ updated: string[]; failed: { id: string; label: string; error: string }[] }} */
       const report = { updated: [], failed: [] };
       const timestamp = new Date().toISOString();
       for (const meta of metas) {
         try {
           await this.fault('before-batch-mark', { gameId, id: meta.id, ...changes });
           if ('protected' in changes) meta.protected = changes.protected;
-          else if (changes.deleted) meta.deletedAt = timestamp; else delete meta.deletedAt;
+          else if (changes.deleted) meta.deletedAt = timestamp;
+          else delete meta.deletedAt;
           await atomicJson(path.join(this.snapshotDir(gameId, meta.id), 'manifest.json'), meta);
+          this.invalidateSnapshotCache(gameId, meta.id);
           report.updated.push(meta.id);
-        } catch (error) { report.failed.push({ id: meta.id, label: meta.label, error: error.message }); }
+        } catch (error) {
+          report.failed.push({ id: meta.id, label: meta.label, error: /** @type {Error} */ (error).message });
+        }
       }
       return report;
     });
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string[]} ids
+   */
   async deleteSnapshots(gameId, ids) {
     return this.exclusive(async () => {
       this.game(gameId);
@@ -511,18 +705,27 @@ export class SaveStore {
       // Preflight the whole selection before marking or deleting any files.
       for (const id of selected) {
         const meta = await this.readSnapshot(gameId, id);
-        if (!meta.deletedAt) throw new Error('只能永久删除回收站或已移除的恢复点中的记录。');
-        if (meta.protected) throw new Error('保护存档不可删除，请先取消保护标记。');
-        const folder = this.snapshotDir(gameId, id), stage = path.join(root, `.purging-${id}`), marker = path.join(root, `.purge-${id}.json`);
+        if (!meta.deletedAt) throw new Error(this.t('storage.purgeOnlyDeleted'));
+        if (meta.protected) throw new Error(this.t('storage.protectedCannotDelete'));
+        const folder = this.snapshotDir(gameId, id),
+          stage = path.join(root, `.purging-${id}`),
+          marker = path.join(root, `.purge-${id}.json`);
         for (const target of [folder, stage, marker]) {
-          if (path.dirname(path.resolve(target)) !== root || !within(this.vault, target)) throw new Error('永久删除路径越界。');
-          await assertNoLinks(target);
+          if (path.dirname(path.resolve(target)) !== root || !within(this.vault, target, this.platform)) {
+            throw new Error(this.t('storage.purgeOutOfBounds'));
+          }
+          await assertNoLinks(target, this.lang);
         }
-        const original = await statMaybe(folder), staged = await statMaybe(stage);
-        if (original && staged || staged && !meta.purgePending) throw new Error('永久删除暂存目录冲突，操作已停止。');
-        await assertTreeNoLinks(folder); await assertTreeNoLinks(stage);
+        const original = await statMaybe(folder),
+          staged = await statMaybe(stage);
+        if ((original && staged) || (staged && !meta.purgePending)) {
+          throw new Error(this.t('storage.purgeStageConflict'));
+        }
+        await assertTreeNoLinks(folder, this.lang);
+        await assertTreeNoLinks(stage, this.lang);
         items.push({ meta, folder, stage, marker });
       }
+      /** @type {{ updated: string[]; failed: { id: string; label: string; error: string }[] }} */
       const report = { updated: [], failed: [] };
       for (const { meta, folder, stage, marker } of items) {
         try {
@@ -530,82 +733,199 @@ export class SaveStore {
           // Keep the intent outside the directory being physically removed, so an
           // interrupted/partial deletion remains visible and can only be retried.
           await atomicJson(marker, { ...meta, purgePending: true });
+          this.invalidateSnapshotCache(gameId, meta.id);
           if (await statMaybe(folder)) await commitSnapshotDirectory(folder, stage);
-          await assertTreeNoLinks(stage);
+          await assertTreeNoLinks(stage, this.lang);
           await this.fault('before-purge-remove', { gameId, id: meta.id, stage });
           await fs.rm(stage, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 });
           await fs.rm(marker, { force: true });
+          this.invalidateSnapshotCache(gameId, meta.id);
           report.updated.push(meta.id);
-          this.onProgress({ phase: 'deleting', completed: report.updated.length + report.failed.length, total: items.length, detail: meta.label });
-        } catch (error) { report.failed.push({ id: meta.id, label: meta.label, error: error.message }); }
+          this.onProgress({
+            phase: 'deleting',
+            completed: report.updated.length + report.failed.length,
+            total: items.length,
+            detail: meta.label,
+          });
+        } catch (error) {
+          this.invalidateSnapshotCache(gameId, meta.id);
+          report.failed.push({ id: meta.id, label: meta.label, error: /** @type {Error} */ (error).message });
+        }
       }
       return report;
     });
   }
 
+  /**
+   * Prunes excess automatic safety restore points beyond maxRestorePoints.
+   * Never removes favorited, protected, trashed, or pending-purge records.
+   * @param {string} gameId
+   * @param {string} [keepId]
+   */
+  async pruneRestorePoints(gameId, keepId) {
+    const limit = Number.isInteger(this.config?.maxRestorePoints) ? this.config.maxRestorePoints : this.maxRestorePoints;
+    if (!Number.isFinite(limit) || limit <= 0) return;
+    const all = await this.snapshots(gameId, true);
+    const activeSafety = all
+      .filter(s => s.kind === 'safety' && !s.deletedAt && !s.protected && !s.favorite && !s.purgePending && !s.corrupted)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (activeSafety.length <= limit) return;
+    const excess = activeSafety.slice(limit).filter(s => s.id !== keepId);
+    for (const old of excess) {
+      try {
+        const folder = this.snapshotDir(gameId, old.id);
+        await assertTreeNoLinks(folder, this.lang);
+        await fs.rm(folder, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 });
+        this.invalidateSnapshotCache(gameId, old.id);
+        await this.logger.info('pruned-safety-restore-point', { gameId, id: old.id });
+      } catch (err) {
+        await this.logger.warn('prune-safety-restore-point-failed', {
+          gameId,
+          id: old.id,
+          error: /** @type {Error} */ (err).message,
+        });
+      }
+    }
+  }
+
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   */
   async restoreSnapshot(gameId, id) {
     return this.exclusive(async () => {
       const game = this.game(gameId);
       const meta = await this.verify(gameId, id);
-      if (meta.deletedAt) throw new Error('请先从回收站找回这份存档。');
+      if (meta.deletedAt) throw new Error(this.t('storage.recoverBeforeRestore'));
       const { root, entries } = await this.location(game);
-      if (!equal([...entries].sort(), [...meta.entries].sort())) throw new Error('当前游戏的备份项目与这份存档不一致。请在游戏设置中恢复对应的相对路径后再读档。');
-      const safety = await this.capture(game, root, entries, { label: this.t('storage.beforeRestoreLabel', { label: meta.label }).slice(0, 100), note: this.t('storage.beforeRestoreNote'), kind: 'safety', allowMissing: true });
+      if (!equal([...entries].sort(), [...meta.entries].sort())) {
+        throw new Error(this.t('storage.restoreEntriesMismatch'));
+      }
+      await assertDiskSpace(root, meta.bytes, this.lang);
+      const safety = await this.capture(game, root, entries, {
+        label: this.t('storage.beforeRestoreLabel', { label: meta.label }).slice(0, 100),
+        note: this.t('storage.beforeRestoreNote'),
+        kind: 'safety',
+        allowMissing: true,
+      });
       const transactionId = randomUUID();
       const stage = path.join(root, `.savehub-restore-${transactionId}`);
       const journalFile = path.join(this.dataDir, 'transactions', `${transactionId}.json`);
-      const journal = { version: 1, id: transactionId, gameId, snapshotId: id, safetyId: safety.id, root, stage, entries, operations: [], status: 'preparing' };
+      /** @type {{ version: number; id: string; gameId: string; snapshotId: string; safetyId: string; root: string; stage: string; entries: string[]; operations: { entry: string; hadTarget: boolean }[]; status: string }} */
+      const journal = {
+        version: 1,
+        id: transactionId,
+        gameId,
+        snapshotId: id,
+        safetyId: safety.id,
+        root,
+        stage,
+        entries,
+        operations: [],
+        status: 'preparing',
+      };
       let journalWritten = false;
       try {
         await copyRecords(path.join(this.snapshotDir(gameId, id), 'payload'), path.join(stage, 'next'), meta.records, this.onProgress);
-        const staged = await inventory(path.join(stage, 'next'), entries, { allowMissing: true });
-        if (signature(staged) !== signature(meta)) throw new Error('恢复文件预校验失败，原存档未改动。');
-        const current = await inventory(root, entries, { allowMissing: true });
-        if (signature(current) !== signature(safety)) throw new Error('游戏存档在恢复前发生了变化，请先关闭游戏后重试。');
+        const staged = await inventory(path.join(stage, 'next'), entries, { allowMissing: true, lang: this.lang });
+        if (signature(staged) !== signature(meta)) {
+          throw new Error(this.t('storage.restoreStageVerifyFailed'));
+        }
+        const current = await inventory(root, entries, { allowMissing: true, lang: this.lang });
+        if (signature(current) !== signature(safety)) {
+          throw new Error(this.t('storage.liveChangedBeforeRestore'));
+        }
         journal.status = 'applying';
-        await atomicJson(journalFile, journal); journalWritten = true;
+        await atomicJson(journalFile, journal);
+        journalWritten = true;
         for (const entry of entries) {
-          await assertNoLinks(path.join(root, entry));
-          const target = path.join(root, entry), previous = path.join(stage, 'previous', entry), next = path.join(stage, 'next', entry);
+          await assertNoLinks(path.join(root, entry), this.lang);
+          const target = path.join(root, entry),
+            previous = path.join(stage, 'previous', entry),
+            next = path.join(stage, 'next', entry);
           const hadTarget = Boolean(await statMaybe(target));
           journal.operations.push({ entry, hadTarget });
           await atomicJson(journalFile, journal);
-          if (hadTarget) { await fs.mkdir(path.dirname(previous), { recursive: true }); await fs.rename(target, previous); }
-          if (await statMaybe(next)) { await fs.mkdir(path.dirname(target), { recursive: true }); await fs.rename(next, target); }
+          if (hadTarget) {
+            await fs.mkdir(path.dirname(previous), { recursive: true });
+            await fs.rename(target, previous);
+          }
+          if (await statMaybe(next)) {
+            await fs.mkdir(path.dirname(target), { recursive: true });
+            await fs.rename(next, target);
+          }
           this.onProgress({ phase: 'restoring', completed: journal.operations.length, total: entries.length, detail: entry });
           await this.fault('after-install', { entry, journal });
         }
-        const restored = await inventory(root, entries, { allowMissing: true });
-        if (signature(restored) !== signature(meta)) throw new Error('读档后的内容校验失败，正在回滚。');
+        const restored = await inventory(root, entries, { allowMissing: true, lang: this.lang });
+        if (signature(restored) !== signature(meta)) {
+          throw new Error(this.t('storage.postRestoreVerifyFailed'));
+        }
         journal.status = 'committed';
         await atomicJson(journalFile, journal);
         // Once committed, cleanup failures must not turn a successful restore into a rollback.
         try {
           await fs.rm(stage, { recursive: true, force: true });
           await fs.rm(journalFile, { force: true });
-        } catch { /* Retain committed journal so the next startup can finish cleanup. */ }
+        } catch (cleanupError) {
+          /* Retain committed journal so the next startup can finish cleanup. */
+          await this.logger.warn('restore-stage-cleanup-deferred', {
+            transactionId,
+            error: /** @type {Error} */ (cleanupError).message,
+          });
+        }
+        await this.pruneRestorePoints(gameId, safety.id);
+        await this.logger.info('restore-committed', { gameId, snapshotId: id, safetyId: safety.id });
         return { safetyId: safety.id, label: meta.label };
       } catch (error) {
+        const errMessage = /** @type {Error} */ (error).message;
         if (journalWritten) {
-          try { await this.rollback(journal, journalFile); } catch (rollbackError) { throw new Error(`读档失败，自动回滚尚未完成：${rollbackError.message}。请保留游戏目录，下次启动将继续恢复。读档恢复点：${safety.id}`); }
-        } else await fs.rm(stage, { recursive: true, force: true }).catch(() => {});
-        throw new Error(`读档未完成，原存档已保留或恢复。${error.message}`);
+          try {
+            await this.rollback(journal, journalFile);
+            await this.logger.warn('restore-rolled-back', { gameId, snapshotId: id, error: errMessage });
+          } catch (rollbackError) {
+            const rbMessage = /** @type {Error} */ (rollbackError).message;
+            await this.logger.error('restore-rollback-failed', { gameId, snapshotId: id, error: errMessage, rollbackError: rbMessage });
+            throw new Error(this.t('storage.restoreRollbackFailed', { rollbackError: rbMessage, safetyId: safety.id }));
+          }
+        } else {
+          await fs.rm(stage, { recursive: true, force: true }).catch(err =>
+            this.logger.warn('restore-uncommitted-stage-cleanup-failed', { stage, error: err.message }),
+          );
+        }
+        throw new Error(this.t('storage.restoreAborted', { error: errMessage }));
       }
     });
   }
 
+  /**
+   * @param {any} journal
+   * @param {string} journalFile
+   */
   async rollback(journal, journalFile) {
-    safeId(journal.id); safeId(journal.gameId);
+    safeId(journal.id, this.lang);
+    safeId(journal.gameId, this.lang);
     const expectedStage = path.join(journal.root, `.savehub-restore-${journal.id}`);
-    if (journal.version !== 1 || !path.isAbsolute(journal.root) || path.resolve(journal.stage) !== expectedStage || !Array.isArray(journal.operations)) throw new Error('恢复日志路径无效，未操作任何游戏文件');
-    const entries = cleanItems(journal.entries);
-    await assertNoLinks(journal.root); await assertNoLinks(journal.stage);
+    if (
+      journal.version !== 1 ||
+      !path.isAbsolute(journal.root) ||
+      path.resolve(journal.stage) !== expectedStage ||
+      !Array.isArray(journal.operations)
+    ) {
+      throw new Error(this.t('storage.invalidJournalPaths'));
+    }
+    const entries = cleanItems(journal.entries, { lang: this.lang });
+    await assertNoLinks(journal.root, this.lang);
+    await assertNoLinks(journal.stage, this.lang);
     for (const operation of [...journal.operations].reverse()) {
-      if (!entries.includes(operation.entry) || typeof operation.hadTarget !== 'boolean') throw new Error('恢复日志项目无效');
+      if (!entries.includes(operation.entry) || typeof operation.hadTarget !== 'boolean') {
+        throw new Error(this.t('storage.invalidJournalEntry'));
+      }
       const target = path.join(journal.root, operation.entry);
       const previous = path.join(journal.stage, 'previous', operation.entry);
       const next = path.join(journal.stage, 'next', operation.entry);
-      await assertNoLinks(target); await assertNoLinks(previous);
+      await assertNoLinks(target, this.lang);
+      await assertNoLinks(previous, this.lang);
       if (await statMaybe(previous)) {
         if (await statMaybe(target)) {
           const failed = path.join(journal.stage, 'failed', operation.entry);
@@ -614,7 +934,7 @@ export class SaveStore {
         }
         await fs.mkdir(path.dirname(target), { recursive: true });
         await fs.rename(previous, target);
-      } else if (!operation.hadTarget && !(await statMaybe(next)) && await statMaybe(target)) {
+      } else if (!operation.hadTarget && !(await statMaybe(next)) && (await statMaybe(target))) {
         const failed = path.join(journal.stage, 'failed', operation.entry);
         await fs.mkdir(path.dirname(failed), { recursive: true });
         await fs.rename(target, failed);
@@ -628,61 +948,105 @@ export class SaveStore {
   async recoverTransactions() {
     const directory = path.join(this.dataDir, 'transactions');
     let names;
-    try { names = await fs.readdir(directory); } catch (error) { if (missing(error)) return; throw error; }
+    try {
+      names = await fs.readdir(directory);
+    } catch (error) {
+      if (missing(error)) return;
+      throw error;
+    }
     for (const name of names.filter(name => name.endsWith('.json'))) {
       const journalFile = path.join(directory, name);
-      const journal = JSON.parse(await fs.readFile(journalFile, 'utf8'));
+      let journal;
+      try {
+        journal = JSON.parse(await fs.readFile(journalFile, 'utf8'));
+      } catch (error) {
+        const quarantineDir = path.join(directory, 'quarantine');
+        await fs.mkdir(quarantineDir, { recursive: true });
+        await fs.rename(journalFile, path.join(quarantineDir, name)).catch(() => {});
+        await this.logger.error('quarantined-corrupt-restore-journal', {
+          name,
+          error: /** @type {Error} */ (error).message,
+        });
+        this.recoveryMessages.push(this.t('storage.quarantinedCorruptJournal', { name }));
+        continue;
+      }
       if (journal.status === 'rolled-back') continue;
       if (journal.status === 'committed') {
-        safeId(journal.id);
-        if (journal.stage !== path.join(journal.root, `.savehub-restore-${journal.id}`)) throw new Error('事务目录无效');
-        await assertNoLinks(journal.stage);
+        safeId(journal.id, this.lang);
+        if (journal.stage !== path.join(journal.root, `.savehub-restore-${journal.id}`)) {
+          throw new Error(this.t('storage.invalidTransactionStage'));
+        }
+        await assertNoLinks(journal.stage, this.lang);
         await fs.rm(journal.stage, { recursive: true, force: true });
         await fs.rm(journalFile, { force: true });
       } else {
         await this.rollback(journal, journalFile);
-        this.recoveryMessages.push('已恢复上次意外中断的读档操作，原游戏存档已还原。');
+        await this.logger.info('recovered-interrupted-restore', { id: journal.id });
+        this.recoveryMessages.push(this.t('storage.recoveredInterruptedRestore'));
       }
     }
   }
 
+  /**
+   * @param {any} journal
+   */
   importReplacementPaths(journal) {
-    if (journal.version !== 1 || !['prepared', 'committed'].includes(journal.status)) throw new Error('导入覆盖事务无效。');
-    const token = safeId(journal.token), gameId = safeId(journal.gameId), id = safeId(journal.id);
+    if (journal.version !== 1 || !['prepared', 'committed'].includes(journal.status)) {
+      throw new Error(this.t('storage.invalidImportReplaceJournal'));
+    }
+    const token = safeId(journal.token, this.lang),
+      gameId = safeId(journal.gameId, this.lang),
+      id = safeId(journal.id, this.lang);
     const root = path.join(this.gameDir(gameId), 'snapshots');
     return {
-      target: this.snapshotDir(gameId, id), stage: path.join(root, `.pending-${token}`), previous: path.join(root, `.replaced-${token}`),
+      target: this.snapshotDir(gameId, id),
+      stage: path.join(root, `.pending-${token}`),
+      previous: path.join(root, `.replaced-${token}`),
       file: path.join(this.dataDir, 'import-transactions', `${token}.json`),
     };
   }
 
+  /**
+   * @param {any} journal
+   */
   async finishImportReplacement(journal) {
     const { target, stage, previous, file } = this.importReplacementPaths(journal);
-    for (const location of [target, stage, previous, file]) await assertNoLinks(location);
-    if (journal.status === 'prepared' && await statMaybe(previous)) {
+    for (const location of [target, stage, previous, file]) await assertNoLinks(location, this.lang);
+    if (journal.status === 'prepared' && (await statMaybe(previous))) {
       if (await statMaybe(target)) {
-        if (await statMaybe(stage)) throw new Error('覆盖恢复目录冲突，原存档仍保留在覆盖事务中。');
+        if (await statMaybe(stage)) throw new Error(this.t('storage.importReplaceStageConflict'));
         await commitSnapshotDirectory(target, stage);
       }
       await commitSnapshotDirectory(previous, target);
     }
-    if (!(await statMaybe(target))) throw new Error('覆盖目标缺失，已保留事务文件供恢复。');
+    if (!(await statMaybe(target))) throw new Error(this.t('storage.importReplaceTargetMissing'));
     for (const directory of [stage, previous]) {
-      await assertTreeNoLinks(directory);
+      await assertTreeNoLinks(directory, this.lang);
       await fs.rm(directory, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 });
     }
     await fs.rm(file, { force: true });
+    this.invalidateSnapshotCache(journal.gameId, journal.id);
   }
 
+  /**
+   * @param {string} gameId
+   * @param {any} original
+   * @param {string} stage
+   * @param {string} token
+   */
   async replaceImportedSnapshot(gameId, original, stage, token) {
     const current = await this.readSnapshot(gameId, original.id);
-    if (!equal(current, original)) throw new Error('覆盖目标在复制期间发生变化，原记录已保留，请重新检查。');
-    if (current.protected || current.deletedAt || current.purgePending || current.kind === 'safety') throw new Error('当前记录不允许覆盖，请选择跳过或两者并存。');
+    if (!equal(current, original)) {
+      throw new Error(this.t('storage.importReplaceTargetChanged'));
+    }
+    if (current.protected || current.deletedAt || current.purgePending || current.kind === 'safety') {
+      throw new Error(this.t('storage.importReplaceTargetForbidden'));
+    }
     const journal = { version: 1, token, gameId, id: original.id, status: 'prepared' };
     const locations = this.importReplacementPaths(journal);
-    if (stage !== locations.stage) throw new Error('覆盖暂存目录无效。');
-    await assertTreeNoLinks(locations.target);
-    if (await statMaybe(locations.previous)) throw new Error('覆盖备份目录已存在。');
+    if (stage !== locations.stage) throw new Error(this.t('storage.importReplaceInvalidStage'));
+    await assertTreeNoLinks(locations.target, this.lang);
+    if (await statMaybe(locations.previous)) throw new Error(this.t('storage.importReplaceBackupExists'));
     await this.fault('before-import-replace', { gameId, id: original.id });
     await atomicJson(locations.file, journal);
     try {
@@ -692,93 +1056,192 @@ export class SaveStore {
       await this.fault('after-import-install', { gameId, id: original.id });
       await atomicJson(locations.file, { ...journal, status: 'committed' });
     } catch (error) {
-      try { await this.finishImportReplacement(journal); }
-      catch (rollbackError) { throw new Error(`导入覆盖失败，原文件已保留，重新打开应用将继续恢复：${error.message}；${rollbackError.message}`); }
-      throw new Error(`导入覆盖失败，原存档已还原：${error.message}`);
+      const errMessage = /** @type {Error} */ (error).message;
+      try {
+        await this.finishImportReplacement(journal);
+      } catch (rollbackError) {
+        const rbMessage = /** @type {Error} */ (rollbackError).message;
+        await this.logger.error('import-replace-rollback-failed', {
+          gameId,
+          id: original.id,
+          error: errMessage,
+          rollbackError: rbMessage,
+        });
+        throw new Error(this.t('storage.importReplaceRollbackFailed', { error: errMessage, rollbackError: rbMessage }));
+      }
+      throw new Error(this.t('storage.importReplaceAborted', { error: errMessage }));
     }
     // Once committed, cleanup failure must not misreport the successful replacement.
     // The persisted journal lets startup finish removing the previous copy.
-    await this.finishImportReplacement({ ...journal, status: 'committed' }).catch(() => {});
+    await this.finishImportReplacement({ ...journal, status: 'committed' }).catch(err =>
+      this.logger.warn('import-replace-cleanup-deferred', { gameId, id: original.id, error: err.message }),
+    );
   }
 
   async recoverImportReplacements() {
     const directory = path.join(this.dataDir, 'import-transactions');
-    await assertNoLinks(directory);
+    await assertNoLinks(directory, this.lang);
     let files;
-    try { files = await fs.readdir(directory); } catch (error) { if (missing(error)) return; throw error; }
+    try {
+      files = await fs.readdir(directory);
+    } catch (error) {
+      if (missing(error)) return;
+      throw error;
+    }
     for (const name of files.filter(name => name.endsWith('.json'))) {
       const file = path.join(directory, name);
-      await assertNoLinks(file);
-      const journal = JSON.parse(await fs.readFile(file, 'utf8'));
-      if (this.importReplacementPaths(journal).file !== file) throw new Error('导入覆盖事务身份不一致。');
+      await assertNoLinks(file, this.lang);
+      let journal;
+      try {
+        journal = JSON.parse(await fs.readFile(file, 'utf8'));
+      } catch (error) {
+        const quarantineDir = path.join(directory, 'quarantine');
+        await fs.mkdir(quarantineDir, { recursive: true });
+        await fs.rename(file, path.join(quarantineDir, name)).catch(() => {});
+        await this.logger.error('quarantined-corrupt-import-journal', {
+          name,
+          error: /** @type {Error} */ (error).message,
+        });
+        this.recoveryMessages.push(this.t('storage.quarantinedCorruptJournal', { name }));
+        continue;
+      }
+      if (this.importReplacementPaths(journal).file !== file) {
+        throw new Error(this.t('storage.importReplaceIdentityMismatch'));
+      }
       // Explicit game cleanup owns these payloads; never resurrect them on restart.
-      if (this.config.games.some(game => game.id === journal.gameId && (game.purgeGamePending || game.purgeSnapshotsPending))) continue;
+      if (this.config.games.some((/** @type {any} */ game) => game.id === journal.gameId && (game.purgeGamePending || game.purgeSnapshotsPending))) {
+        continue;
+      }
       await this.finishImportReplacement(journal);
-      if (journal.status === 'prepared') this.recoveryMessages.push('已还原上次意外中断的导入覆盖，原存档已保留。');
+      if (journal.status === 'prepared') {
+        await this.logger.info('recovered-interrupted-import-replace', { gameId: journal.gameId, id: journal.id });
+        this.recoveryMessages.push(this.t('storage.recoveredInterruptedImportReplace'));
+      }
     }
   }
 
+  /**
+   * @param {any} candidate
+   * @param {any[]} snapshots
+   */
   importMatches(candidate, snapshots) {
-    const key = value => this.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const key = (/** @type {string} */ value) =>
+      this.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
     // An imported directory identifies a save even when its contents have changed.
     // Equal contents in distinct source directories may be intentional checkpoints.
-    return snapshots.filter(snapshot => (snapshot.origin?.path && key(snapshot.origin.path) === key(candidate.source)) ||
-      (candidate.bundle && candidate.meta && (snapshot.id === candidate.meta.id ||
-        (snapshot.origin?.gameId === candidate.meta.gameId && snapshot.origin?.snapshotId === candidate.meta.id))));
+    return snapshots.filter(
+      snapshot =>
+        (snapshot.origin?.path && key(snapshot.origin.path) === key(candidate.source)) ||
+        (candidate.bundle &&
+          candidate.meta &&
+          (snapshot.id === candidate.meta.id ||
+            (snapshot.origin?.gameId === candidate.meta.gameId && snapshot.origin?.snapshotId === candidate.meta.id))),
+    );
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string} directory
+   */
   async prepareImport(gameId, directory) {
     return this.exclusive(async () => {
       const plan = await this.prepareImportPlan(gameId, directory);
-      return structuredClone({ id: plan.id, gameId, directory, failed: plan.failed, items: plan.items.map(item => ({
-        id: item.id, name: item.name, source: item.source, bytes: item.bytes, fileCount: item.fileCount, matches: item.matches,
-      })) });
+      return structuredClone({
+        id: plan.id,
+        gameId,
+        directory,
+        failed: plan.failed,
+        items: plan.items.map((/** @type {any} */ item) => ({
+          id: item.id,
+          name: item.name,
+          source: item.source,
+          bytes: item.bytes,
+          fileCount: item.fileCount,
+          matches: item.matches,
+        })),
+      });
     });
   }
 
+  /**
+   * @param {string} planId
+   */
   cancelImport(planId) {
     if (this.pendingImport?.id === planId) this.pendingImport = null;
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string} directory
+   * @param {{ game?: any; bundle?: boolean }} [options]
+   */
   async prepareImportPlan(gameId, directory, { game = this.game(gameId), bundle = false } = {}) {
     if (!bundle) this.pendingImport = null;
-    const entries = cleanItems(game.locations[this.platform]?.items || [], { allowEmpty: bundle });
-    if (typeof directory !== 'string' || !path.isAbsolute(directory)) throw new Error('请选择旧存档目录。');
+    const entries = cleanItems(game.locations[this.platform]?.items || [], { allowEmpty: bundle, lang: this.lang });
+    if (typeof directory !== 'string' || !path.isAbsolute(directory)) {
+      throw new Error(this.t('storage.pickLegacyDirRequired'));
+    }
     directory = path.resolve(directory);
-    await assertNoLinks(directory);
-    if (within(this.dataDir, directory) || within(directory, this.dataDir)) throw new Error('不能从 SaveHub 资料库本身导入。');
+    await assertNoLinks(directory, this.lang);
+    if (within(this.dataDir, directory, this.platform) || within(directory, this.dataDir, this.platform)) {
+      throw new Error(this.t('storage.cannotImportFromVault'));
+    }
     const manifestFile = path.join(directory, 'manifest.json');
     const collectionFile = path.join(directory, 'collection.json');
+    /** @type {{ id: string; gameId: string; entries: string[]; directory: string; items: any[]; failed: { name: string; error: string }[]; bundle: boolean; indexHash?: string }} */
     const plan = { id: randomUUID(), gameId, entries, directory, items: [], failed: [], bundle };
     const existing = await this.snapshots(gameId, true);
+    /** @type {any[]} */
     let candidates;
     const namedExports = await this.namedExportCandidates(directory);
     if (namedExports) {
       candidates = namedExports;
     } else if (await statMaybe(collectionFile)) {
-      await assertNoLinks(collectionFile);
+      await assertNoLinks(collectionFile, this.lang);
       const collection = JSON.parse(await fs.readFile(collectionFile, 'utf8'));
-      if (collection.version !== 1 || collection.type !== 'savehub-collection') throw new Error('批量导出清单格式无效。');
-      candidates = this.validateSelection(collection.snapshots).map(id => ({ name: id, id, exported: path.join(directory, `SaveHub-${id}`) }));
+      if (collection.version !== 1 || collection.type !== 'savehub-collection') {
+        throw new Error(this.t('storage.invalidCollectionManifest'));
+      }
+      candidates = this.validateSelection(collection.snapshots).map(id => ({
+        name: id,
+        id,
+        exported: path.join(directory, `SaveHub-${id}`),
+      }));
     } else if (await statMaybe(manifestFile)) {
       candidates = [{ name: path.basename(directory), exported: directory }];
     } else {
       const children = await fs.readdir(directory, { withFileTypes: true });
-      candidates = children.filter(item => item.isDirectory() && item.name.startsWith('ArchiveFile')).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true })).map(item => ({ name: item.name, source: path.join(directory, item.name) }));
+      candidates = children
+        .filter(item => item.isDirectory() && item.name.startsWith('ArchiveFile'))
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }))
+        .map(item => ({ name: item.name, source: path.join(directory, item.name) }));
       if (!candidates.length) candidates = [{ name: path.basename(directory), source: directory }];
     }
-    if (candidates.length > 10000) throw new Error('一次最多导入 10,000 份存档。');
+    if (candidates.length > 10000) throw new Error(this.t('storage.maxImportCandidates'));
     for (const [index, candidate] of candidates.entries()) {
       this.onProgress({ phase: 'checking', completed: index, total: candidates.length, detail: candidate.name });
       try {
         if (candidate.exported) {
           const manifest = path.join(candidate.exported, 'manifest.json');
-          if (!candidate.meta) await assertNoLinks(manifest);
-          const meta = candidate.meta || validateManifest(JSON.parse(await fs.readFile(manifest, 'utf8')));
-          if (candidate.id && candidate.id !== meta.id) throw new Error('导出存档的身份与批量清单不一致。');
+          if (!candidate.meta) await assertNoLinks(manifest, this.lang);
+          const meta = candidate.meta || validateManifest(JSON.parse(await fs.readFile(manifest, 'utf8')), this.lang);
+          if (candidate.id && candidate.id !== meta.id) {
+            throw new Error(this.t('storage.exportIdMismatch'));
+          }
           candidate.name = meta.label;
-          if (!bundle && !equal([...meta.entries].sort(), [...entries].sort())) throw new Error('导出存档的相对路径与当前游戏配置不一致。');
-          if (bundle && (!['manual', 'imported', 'safety'].includes(meta.kind) || !['win32', 'darwin'].includes(meta.platform) || !Number.isFinite(Date.parse(meta.createdAt)) || (meta.deletedAt && !Number.isFinite(Date.parse(meta.deletedAt))) || meta.purgePending)) throw new Error('游戏包的存档状态无效或尚未完成清理。');
+          if (!bundle && !equal([...meta.entries].sort(), [...entries].sort())) {
+            throw new Error(this.t('storage.exportEntriesMismatch'));
+          }
+          if (
+            bundle &&
+            (!['manual', 'imported', 'safety'].includes(meta.kind) ||
+              !['win32', 'darwin'].includes(meta.platform) ||
+              !Number.isFinite(Date.parse(meta.createdAt)) ||
+              (meta.deletedAt && !Number.isFinite(Date.parse(meta.deletedAt))) ||
+              meta.purgePending)
+          ) {
+            throw new Error(this.t('storage.bundleSnapshotInvalidState'));
+          }
           candidate.bundle = bundle;
           candidate.entries = bundle ? meta.entries : entries;
           candidate.source = candidate.meta ? candidate.exported : path.join(candidate.exported, 'payload');
@@ -788,44 +1251,77 @@ export class SaveStore {
           candidate.favorite = meta.favorite;
           candidate.protected = meta.protected;
         }
-        const data = await inventory(candidate.source, candidate.entries || entries, { allowMissing: Boolean(candidate.allowMissing) });
-        if (candidate.meta && signature(data) !== signature(candidate.meta)) throw new Error('导出存档的完整性校验失败。');
-        plan.items.push({ ...candidate, id: randomUUID(), fingerprint: fingerprint(data),
+        const data = await inventory(candidate.source, candidate.entries || entries, {
+          allowMissing: Boolean(candidate.allowMissing),
+          lang: this.lang,
+        });
+        if (candidate.meta && signature(data) !== signature(candidate.meta)) {
+          throw new Error(this.t('storage.exportIntegrityFailed'));
+        }
+        plan.items.push({
+          ...candidate,
+          id: randomUUID(),
+          fingerprint: fingerprint(data),
           bytes: data.records.reduce((total, record) => total + (record.size || 0), 0),
           fileCount: data.records.filter(record => record.type === 'file').length,
           matches: this.importMatches(candidate, existing),
         });
-      } catch (error) { plan.failed.push({ name: candidate.name, error: error.message }); }
+      } catch (error) {
+        plan.failed.push({ name: candidate.name, error: /** @type {Error} */ (error).message });
+      }
     }
     if (!bundle) this.pendingImport = plan;
     return plan;
   }
 
+  /**
+   * @param {string} planId
+   * @param {any[]} decisions
+   */
   async executeImport(planId, decisions) {
     return this.exclusive(() => this.executeImportPlan(planId, decisions));
   }
 
+  /**
+   * @param {string} planId
+   * @param {any[]} decisions
+   */
   async executeImportPlan(planId, decisions) {
     const plan = this.pendingImport;
-    if (!plan || plan.id !== planId) throw new Error('本次导入检查已失效，请重新选择目录。');
+    if (!plan || plan.id !== planId) throw new Error(this.t('storage.importPlanExpired'));
     const game = this.game(plan.gameId);
     const choices = await this.validateImportPlan(plan, decisions);
     this.pendingImport = null; // An execution token is single use, including partial failure.
     return this.applyImportPlan(plan, choices, game);
   }
 
+  /**
+   * @param {any} plan
+   * @param {any[]} decisions
+   */
   async validateImportPlan(plan, decisions) {
-    if (!plan.bundle && !equal(cleanItems(this.game(plan.gameId).locations[this.platform]?.items || []), plan.entries)) throw new Error('游戏配置已变化，请重新检查导入目录。');
-    const duplicates = plan.items.filter(item => item.matches.length);
-    if (!Array.isArray(decisions) || decisions.length !== duplicates.length) throw new Error('请为每份重复存档选择处理方式。');
-    const choices = new Map(), targets = new Set();
+    if (!plan.bundle && !equal(cleanItems(this.game(plan.gameId).locations[this.platform]?.items || [], { lang: this.lang }), plan.entries)) {
+      throw new Error(this.t('storage.gameConfigChangedDuringImport'));
+    }
+    const duplicates = plan.items.filter((/** @type {any} */ item) => item.matches.length);
+    if (!Array.isArray(decisions) || decisions.length !== duplicates.length) {
+      throw new Error(this.t('storage.missingDuplicateDecisions'));
+    }
+    const choices = new Map(),
+      targets = new Set();
     for (const decision of decisions) {
-      const item = duplicates.find(item => item.id === decision?.itemId);
-      if (!item || choices.has(item.id) || !['overwrite', 'skip', 'keep-both'].includes(decision.action)) throw new Error('重复存档的处理方式无效。');
+      const item = duplicates.find((/** @type {any} */ item) => item.id === decision?.itemId);
+      if (!item || choices.has(item.id) || !['overwrite', 'skip', 'keep-both'].includes(decision.action)) {
+        throw new Error(this.t('storage.invalidDuplicateDecision'));
+      }
       if (decision.action === 'overwrite') {
-        const target = item.matches.find(snapshot => snapshot.id === decision.targetId);
-        if (!target || targets.has(target.id)) throw new Error('请选择唯一的覆盖目标，不能重复覆盖同一份记录。');
-        if (target.protected || target.deletedAt || target.purgePending || target.kind === 'safety') throw new Error('保护存档、回收站记录和读档恢复点不能被导入覆盖，请选择跳过或两者并存。');
+        const target = item.matches.find((/** @type {any} */ snapshot) => snapshot.id === decision.targetId);
+        if (!target || targets.has(target.id)) {
+          throw new Error(this.t('storage.duplicateOverwriteTarget'));
+        }
+        if (target.protected || target.deletedAt || target.purgePending || target.kind === 'safety') {
+          throw new Error(this.t('storage.protectedTrashSafetyCannotOverwrite'));
+        }
         targets.add(target.id);
       }
       choices.set(item.id, decision);
@@ -833,106 +1329,195 @@ export class SaveStore {
     // Reject stale library decisions before committing any item in the batch.
     const existing = await this.snapshots(plan.gameId, true);
     for (const item of plan.items) {
-      if (!equal(this.importMatches(item, existing), item.matches)) throw new Error('重复存档的状态已变化，请重新检查后选择处理方式。');
+      if (!equal(this.importMatches(item, existing), item.matches)) {
+        throw new Error(this.t('storage.duplicateMatchesChanged'));
+      }
     }
     return choices;
   }
 
+  /**
+   * @param {any} plan
+   * @param {Map<string, any>} choices
+   * @param {any} game
+   */
   async applyImportPlan(plan, choices, game) {
     const existing = await this.snapshots(game.id, true);
+    /** @type {{ imported: string[]; overwritten: string[]; keptBoth: string[]; skipped: string[]; failed: { name: string; error: string }[] }} */
     const report = { imported: [], overwritten: [], keptBoth: [], skipped: [], failed: [...plan.failed] };
-    const names = new Set([...existing.map(item => foldedName(item.label)), ...plan.items.map(item => foldedName(item.name.slice(0, 100)))]);
+    const names = new Set([
+      ...existing.map(item => foldedName(item.label)),
+      ...plan.items.map((/** @type {any} */ item) => foldedName(item.name.slice(0, 100))),
+    ]);
     for (const [index, item] of plan.items.entries()) {
       this.onProgress({ phase: 'importing', completed: index, total: plan.items.length, detail: item.name });
       const choice = choices.get(item.id);
-      if (choice?.action === 'skip') { report.skipped.push(item.name); continue; }
+      if (choice?.action === 'skip') {
+        report.skipped.push(item.name);
+        continue;
+      }
       try {
         let label = item.name.slice(0, 100);
         if (choice?.action === 'keep-both') {
           let number = 2;
-          do { const suffix = ` (${number++})`; label = item.name.slice(0, 100 - suffix.length) + suffix; } while (names.has(foldedName(label)));
+          do {
+            const suffix = ` (${number++})`;
+            label = item.name.slice(0, 100 - suffix.length) + suffix;
+          } while (names.has(foldedName(label)));
         }
         const replace = choice?.action === 'overwrite' ? await this.readSnapshot(game.id, choice.targetId) : undefined;
-        if (replace && !equal(publicSnapshot(replace), item.matches.find(target => target.id === replace.id))) throw new Error('覆盖目标已变化，请重新检查后再导入。');
-        await this.capture(game, item.source, item.entries || plan.entries, { label, note: item.note || this.t('storage.importedFromNote', { source: item.source }), kind: 'imported',
-          allowMissing: Boolean(item.allowMissing), origin: { path: item.source, ...(item.bundle ? { gameId: item.meta.gameId, snapshotId: item.meta.id } : {}) }, favorite: item.favorite, protected: item.protected,
-          expectedFingerprint: item.fingerprint, replace,
-          metadata: item.bundle ? { kind: item.meta.kind, platform: item.meta.platform, createdAt: item.meta.createdAt, ...(item.meta.deletedAt ? { deletedAt: item.meta.deletedAt } : {}) } : undefined,
+        if (replace && !equal(publicSnapshot(replace), item.matches.find((/** @type {any} */ target) => target.id === replace.id))) {
+          throw new Error(this.t('storage.overwriteTargetChanged'));
+        }
+        await this.capture(game, item.source, item.entries || plan.entries, {
+          label,
+          note: item.note || this.t('storage.importedFromNote', { source: item.source }),
+          kind: 'imported',
+          allowMissing: Boolean(item.allowMissing),
+          origin: {
+            path: item.source,
+            ...(item.bundle ? { gameId: item.meta.gameId, snapshotId: item.meta.id } : {}),
+          },
+          favorite: item.favorite,
+          protected: item.protected,
+          expectedFingerprint: item.fingerprint,
+          replace,
+          metadata: item.bundle
+            ? {
+                kind: item.meta.kind,
+                platform: item.meta.platform,
+                createdAt: item.meta.createdAt,
+                ...(item.meta.deletedAt ? { deletedAt: item.meta.deletedAt } : {}),
+              }
+            : undefined,
         });
         names.add(foldedName(label));
         if (choice?.action === 'overwrite') report.overwritten.push(item.name);
         else if (choice?.action === 'keep-both') report.keptBoth.push(label);
         else report.imported.push(item.name);
-      } catch (error) { report.failed.push({ name: item.name, error: error.message }); }
+      } catch (error) {
+        report.failed.push({ name: item.name, error: /** @type {Error} */ (error).message });
+      }
     }
     return report;
   }
 
   // Non-interactive callers retain the conservative default of skipping duplicates.
   // The desktop UI always uses prepareImport + explicit per-item decisions.
+  /**
+   * @param {string} gameId
+   * @param {string} directory
+   */
   async importLegacy(gameId, directory) {
     return this.exclusive(async () => {
       const plan = await this.prepareImportPlan(gameId, directory);
-      return this.executeImportPlan(plan.id, plan.items.filter(item => item.matches.length).map(item => ({ itemId: item.id, action: 'skip' })));
+      return this.executeImportPlan(
+        plan.id,
+        plan.items.filter(item => item.matches.length).map(item => ({ itemId: item.id, action: 'skip' })),
+      );
     });
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string} id
+   * @param {string} destination
+   */
   async exportSnapshot(gameId, id, destination) {
     const result = await this.exportSnapshots(gameId, [id], destination);
     return result.folder;
   }
 
+  /**
+   * @param {string} root
+   * @param {string} [onlyFolder]
+   */
   async exportIndexCandidates(root, onlyFolder) {
     const indexDir = path.join(root, EXPORT_INDEX);
-    await assertNoLinks(indexDir);
+    await assertNoLinks(indexDir, this.lang);
     if (!(await statMaybe(indexDir))?.isDirectory()) return null;
     const candidates = [];
     const seen = new Set();
     for (const file of (await fs.readdir(indexDir)).filter(file => file.endsWith('.json')).sort()) {
-      await assertNoLinks(path.join(indexDir, file));
+      await assertNoLinks(path.join(indexDir, file), this.lang);
       const index = JSON.parse(await fs.readFile(path.join(indexDir, file), 'utf8'));
-      if (index.version !== 2 || index.type !== 'savehub-collection' || !Array.isArray(index.snapshots) || !index.snapshots.length || index.snapshots.length > 10000) throw new Error('命名导出清单格式无效。');
+      if (
+        index.version !== 2 ||
+        index.type !== 'savehub-collection' ||
+        !Array.isArray(index.snapshots) ||
+        !index.snapshots.length ||
+        index.snapshots.length > 10000
+      ) {
+        throw new Error(this.t('storage.invalidNamedExportIndex'));
+      }
       for (const item of index.snapshots) {
-        const [name] = cleanItems([item.directory]);
-        if (name.includes('/') || foldedName(name) === EXPORT_INDEX || seen.has(foldedName(name))) throw new Error('导出清单包含无效或重复的存档目录。');
+        const [name] = cleanItems([item.directory], { lang: this.lang });
+        if (name.includes('/') || foldedName(name) === EXPORT_INDEX || seen.has(foldedName(name))) {
+          throw new Error(this.t('storage.invalidOrDuplicateExportDir'));
+        }
         seen.add(foldedName(name));
         if (onlyFolder && name !== onlyFolder) continue;
-        const meta = validateManifest(item.manifest);
+        const meta = validateManifest(item.manifest, this.lang);
         candidates.push({ name: meta.label, id: meta.id, meta, exported: path.join(root, name) });
       }
     }
     return candidates.length ? candidates : null;
   }
 
+  /**
+   * @param {string} directory
+   */
   async namedExportCandidates(directory) {
     // A single named folder can contain arbitrary game files named manifest.json or collection.json.
-    return await this.exportIndexCandidates(path.dirname(directory), path.basename(directory)) || await this.exportIndexCandidates(directory);
+    return (
+      (await this.exportIndexCandidates(path.dirname(directory), path.basename(directory))) ||
+      (await this.exportIndexCandidates(directory))
+    );
   }
 
+  /**
+   * @param {string} gameId
+   * @param {any} meta
+   * @param {string} folder
+   */
   async writeExport(gameId, meta, folder) {
     await copyRecords(path.join(this.snapshotDir(gameId, meta.id), 'payload'), folder, meta.records, this.onProgress);
-    const copy = await inventory(folder, meta.entries, { allowMissing: true });
-    if (signature(copy) !== signature(meta)) throw new Error('导出文件校验失败。');
+    const copy = await inventory(folder, meta.entries, { allowMissing: true, lang: this.lang });
+    if (signature(copy) !== signature(meta)) throw new Error(this.t('storage.exportWriteVerifyFailed'));
   }
 
+  /**
+   * @param {string} gameId
+   * @param {string[] | 'all'} selection
+   * @param {string} destination
+   */
   async exportSnapshots(gameId, selection, destination) {
     return this.exclusive(async () => {
       const game = this.game(gameId);
-      const ids = selection === 'all'
-        ? (await this.snapshots(gameId)).filter(meta => ['manual', 'imported'].includes(meta.kind)).map(meta => meta.id)
-        : selection;
+      const ids =
+        selection === 'all'
+          ? (await this.snapshots(gameId)).filter(meta => ['manual', 'imported'].includes(meta.kind)).map(meta => meta.id)
+          : selection;
       const selected = this.validateSelection(ids);
-      if (typeof destination !== 'string' || !path.isAbsolute(destination)) throw new Error('请选择导出目录。');
-      await assertNoLinks(destination);
-      if (within(this.dataDir, destination)) throw new Error('请选择 SaveHub 资料库以外的导出目录。');
+      if (typeof destination !== 'string' || !path.isAbsolute(destination)) {
+        throw new Error(this.t('storage.pickExportDirRequired'));
+      }
+      await assertNoLinks(destination, this.lang);
+      if (within(this.dataDir, destination, this.platform)) {
+        throw new Error(this.t('storage.exportDirInsideVault'));
+      }
       const metas = [];
       for (const id of selected) metas.push(await this.verify(gameId, id));
+      const totalBytes = metas.reduce((sum, meta) => sum + (meta.bytes || 0), 0);
+      await assertDiskSpace(destination, totalBytes, this.lang);
       const batchId = randomUUID();
       const stage = path.join(destination, `.savehub-export-${batchId}`);
       const existing = new Set((await fs.readdir(destination)).map(foldedName));
       // Old unwrapped exports may retain index entries after a named folder is moved.
       // Reserve those names so importing the new bundle cannot resolve to an old entry.
-      for (const candidate of await this.exportIndexCandidates(destination) || []) existing.add(foldedName(path.basename(candidate.exported)));
+      for (const candidate of (await this.exportIndexCandidates(destination)) || []) {
+        existing.add(foldedName(path.basename(candidate.exported)));
+      }
       const folder = path.join(destination, uniqueExportName(`${exportName(game.name)}-存档导出`, existing));
       const indexDir = path.join(folder, EXPORT_INDEX);
       const taken = new Set([EXPORT_INDEX]);
@@ -953,32 +1538,49 @@ export class SaveStore {
         folderCreated = true;
         await fs.mkdir(indexDir);
         for (const name of directories) {
-          const target = path.join(folder, name), source = path.join(stage, name);
+          const target = path.join(folder, name),
+            source = path.join(stage, name);
           await this.fault('before-export-publish', { directory: name, folder });
           await fs.mkdir(target);
           published.push(target);
-          for (const child of await fs.readdir(source)) await fs.rename(path.join(source, child), path.join(target, child));
+          for (const child of await fs.readdir(source)) {
+            await fs.rename(path.join(source, child), path.join(target, child));
+          }
         }
-        await atomicJson(indexFile, { version: 2, type: 'savehub-collection', gameId, gameName: game.name, exportedAt: new Date().toISOString(), snapshots: metas.map((manifest, index) => ({ directory: directories[index], manifest })) });
+        await atomicJson(indexFile, {
+          version: 2,
+          type: 'savehub-collection',
+          gameId,
+          gameName: game.name,
+          exportedAt: new Date().toISOString(),
+          snapshots: metas.map((manifest, index) => ({ directory: directories[index], manifest })),
+        });
         return { folder, count: metas.length, directories, indexFile };
       } catch (error) {
         for (const target of published) {
-          if (!within(destination, folder) || folder === destination || !within(folder, target) || target === folder) throw new Error('导出清理目录越界。');
+          if (
+            !within(destination, folder, this.platform) ||
+            folder === destination ||
+            !within(folder, target, this.platform) ||
+            target === folder
+          ) {
+            throw new Error(this.t('storage.exportCleanupOutOfBounds'));
+          }
           await fs.rm(target, { recursive: true, force: true });
         }
         if (folderCreated) {
           // Remove only empty containers so concurrent, unrelated files survive.
-          await fs.rmdir(indexDir).catch(() => {});
-          await fs.rmdir(folder).catch(() => {});
+          await fs.rmdir(indexDir).catch(err => this.logger.warn('export-index-rmdir-failed', { indexDir, error: err.message }));
+          await fs.rmdir(folder).catch(err => this.logger.warn('export-folder-rmdir-failed', { folder, error: err.message }));
         }
         throw error;
       } finally {
         // This uniquely named, owned staging folder is always inside the chosen destination.
-        if (!within(destination, stage)) throw new Error('导出暂存目录越界。');
-        await fs.rm(stage, { recursive: true, force: true }).catch(() => {});
+        if (!within(destination, stage, this.platform)) throw new Error(this.t('storage.exportStageOutOfBounds'));
+        await fs.rm(stage, { recursive: true, force: true }).catch(err =>
+          this.logger.warn('export-stage-cleanup-failed', { stage, error: err.message }),
+        );
       }
     });
   }
 }
-
-export { statMaybe, assertTreeNoLinks, exportName, uniqueExportName, foldedName, fingerprint };

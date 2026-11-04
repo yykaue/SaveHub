@@ -12,6 +12,8 @@ const en: TranslationSchema = {
     bootLoading: 'Opening your save library…',
     closeNotification: 'Dismiss notification',
     preparingProgress: 'Preparing, please wait…',
+    errorBoundaryTitle: 'The Interface Encountered an Issue',
+    errorBoundaryDesc: 'Your saved records remain safely in your local vault.',
   },
   sidebar: {
     homeAria: 'SaveHub Home',

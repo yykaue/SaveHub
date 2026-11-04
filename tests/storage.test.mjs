@@ -4,7 +4,7 @@ import path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { SaveStore, cleanItems, within, atomicJson, commitSnapshotDirectory } from '../electron/storage.mjs';
+import { SaveStore, cleanItems, within, equal, atomicJson, commitSnapshotDirectory } from '../electron/storage.mjs';
 import { readLiteralScript, makePresets } from '../electron/presets.mjs';
 
 const testRoot = path.resolve('.test-data');
@@ -950,4 +950,50 @@ test('simultaneous writes are refused until the restore completes', async t => {
   await assert.rejects(store.setTheme('tech'), /正在进行/);
   release(); await restoring;
   assert.equal(store.busy, false);
+});
+
+test('deep equal is independent of object key order and within folds case on darwin/win32', () => {
+  assert.equal(equal({ a: 1, b: [2, { c: 3, d: 4 }] }, { b: [2, { d: 4, c: 3 }], a: 1, ignored: undefined }), true);
+  assert.equal(equal({ a: 1 }, { a: 2 }), false);
+  assert.equal(within('/Users/Test/Games', '/users/test/games/Save1', 'darwin'), true);
+  assert.equal(within('/Users/Test/Games', '/Users/Test/Other', 'darwin'), false);
+});
+
+test('backend errors are localized to English when language is set to en', async t => {
+  const { store, id, source } = await fixture(t);
+  await store.setLanguage('en');
+  await fs.rm(path.join(source, 'preferences'));
+  await assert.rejects(save(store, id), /Save path not found/);
+});
+
+test('automatic restore point retention prunes oldest unprotected restore points', async t => {
+  const { store, id, source } = await fixture(t, { maxRestorePoints: 2 });
+  const snap = await save(store, id, '基准存档');
+  await fs.writeFile(path.join(source, 'preferences'), 'v1');
+  await store.restoreSnapshot(id, snap.id);
+  const firstRestorePoint = (await store.snapshots(id)).find(s => s.kind === 'safety');
+  assert.ok(firstRestorePoint);
+  await store.updateSnapshot(id, firstRestorePoint.id, { favorite: true });
+
+  for (const ver of ['v2', 'v3', 'v4']) {
+    await fs.writeFile(path.join(source, 'preferences'), ver);
+    await store.restoreSnapshot(id, snap.id);
+  }
+  const restorePoints = (await store.snapshots(id)).filter(s => s.kind === 'safety');
+  // 1 favorited + maxRestorePoints (2) unprotected = 3
+  assert.equal(restorePoints.length, 3);
+  assert.ok(restorePoints.some(s => s.id === firstRestorePoint.id));
+});
+
+test('corrupted transaction journal is quarantined during startup recovery and logged', async t => {
+  const { store } = await fixture(t);
+  const txDir = path.join(store.dataDir, 'transactions');
+  await fs.mkdir(txDir, { recursive: true });
+  await fs.writeFile(path.join(txDir, 'corrupt-journal.json'), '{not-valid-json');
+  const recovered = await new SaveStore(store.dataDir).init();
+  assert.ok(recovered.recoveryMessages.some(msg => msg.includes('corrupt-journal.json')));
+  const quarantined = await fs.readdir(path.join(txDir, 'quarantine'));
+  assert.deepEqual(quarantined, ['corrupt-journal.json']);
+  const logContent = await read(recovered.logger.logFile);
+  assert.match(logContent, /quarantined-corrupt-restore-journal/);
 });
