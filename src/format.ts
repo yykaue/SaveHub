@@ -23,7 +23,7 @@ export const formatBytes = (bytes: number) =>
         : `${(bytes / 1073741824).toFixed(2)} GB`;
 
 export const dateLabel = (value: string, language: Language = getLanguage()) =>
-  value
+  value && Number.isFinite(Date.parse(value))
     ? new Intl.DateTimeFormat(getLanguageMeta(language).dateLocale, {
         month: '2-digit',
         day: '2-digit',
@@ -34,6 +34,6 @@ export const dateLabel = (value: string, language: Language = getLanguage()) =>
     : t('format.unreadableDate', undefined, language);
 
 export const fullDate = (value: string, language: Language = getLanguage()) =>
-  value
+  value && Number.isFinite(Date.parse(value))
     ? new Date(value).toLocaleString(getLanguageMeta(language).dateLocale, { hour12: false })
     : t('format.unknownDate', undefined, language);

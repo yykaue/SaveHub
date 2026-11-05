@@ -54,7 +54,7 @@ export function Modal({
   return (
     <div
       className="modal-backdrop"
-      onMouseDown={event => {
+      onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
@@ -67,12 +67,7 @@ export function Modal({
       >
         <div className="modal-heading">
           <h2 id="dialog-title">{title}</h2>
-          <button
-            className="icon-button"
-            aria-label={t('modals.closeDialogAria')}
-            disabled={busy}
-            onClick={onClose}
-          >
+          <button className="icon-button" aria-label={t('modals.closeDialogAria')} disabled={busy} onClick={onClose}>
             <X size={20} />
           </button>
         </div>
@@ -81,4 +76,3 @@ export function Modal({
     </div>
   );
 }
-

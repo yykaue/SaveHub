@@ -1,25 +1,15 @@
-name: Build SaveHub
+name: Verify and build SaveHub
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
     tags: ['v*']
   pull_request:
-
 permissions:
   contents: read
-
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: win
-          - os: macos-latest
-            target: mac
-    runs-on: ${{ matrix.os }}
+  checks:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -30,29 +20,102 @@ jobs:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm check:contracts
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm test:ui
-      - run: pnpm test:interactions
-      - run: pnpm test:deletion
-      - run: pnpm test:import
-      - run: pnpm test:games
+      - run: pnpm test:e2e --grep '(smoke|retention-interactions)$'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checks-evidence
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: warn
+  package:
+    if: github.event_name != 'pull_request'
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+            arch: x64
+          - os: macos-15
+            target: mac
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Verify native architecture
+        run: node -e "if(process.arch!=='${{ matrix.arch }}')throw new Error('Unexpected runner architecture')"
+      - name: Verify release tag matches package version
+        run: node -e "const p=require('./package.json');if(process.env.GITHUB_REF_TYPE==='tag'&&process.env.GITHUB_REF_NAME!=='v'+p.version)throw new Error('Tag and package version differ')"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+      - name: Full source regression
+        run: pnpm test:e2e
       - run: pnpm dist:${{ matrix.target }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Full packaged regression
+        run: node scripts/test-package.mjs
       - if: matrix.target == 'win'
-        run: node scripts/portable-smoke.mjs
+        run: pnpm test:portable
+      - if: matrix.target == 'win'
+        run: pwsh -NoProfile -File scripts/test-installer.ps1
+      - if: matrix.target == 'mac'
+        run: node scripts/test-apfs.mjs
+      - run: pnpm checksums
+      - run: pnpm audit:release
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-${{ matrix.target }}
+          path: |
+            test-results/
+            playwright-report/
+            release/**/audit-*.json
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: SaveHub-${{ matrix.target }}
           path: |
-            release/**/*.exe
-            release/**/*.dmg
-            release/**/*.zip
-            docs/screenshots/verification.json
-            docs/screenshots/interaction-verification.json
-            docs/screenshots/deletion-verification.json
-            docs/screenshots/import-verification.json
-            docs/screenshots/game-management-verification.json
-            docs/screenshots/portable-verification.json
+            release/*/*.exe
+            release/*/*.dmg
+            release/*/*.zip
+            release/*/SHA256SUMS.txt
+            release/*/audit-*.json
           if-no-files-found: error
+  draft:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: SaveHub-*
+          path: artifacts
+      - name: Assemble audited attachments and draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir attachments
+          find artifacts -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name 'audit-*.json' \) -exec cp -n {} attachments/ \;
+          find artifacts -type f -name SHA256SUMS.txt -exec cat {} + > attachments/SHA256SUMS.txt
+          (cd attachments && sha256sum --check SHA256SUMS.txt)
+          gh release create "$GITHUB_REF_NAME" attachments/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes

@@ -15,5 +15,16 @@
     "resolveJsonModule": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "electron/*.mjs", "vite.config.ts"]
+  "include": [
+    "src",
+    "electron/*.mjs",
+    "vite.config.ts",
+    "electron/preload.cjs",
+    "shared",
+    "scripts/e2e-harness.mjs",
+    "scripts/generate-preload.mjs",
+    "tests/contracts.ts",
+    "tests/e2e",
+    "playwright.config.ts"
+  ]
 }

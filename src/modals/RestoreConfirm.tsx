@@ -62,7 +62,7 @@ export function RestoreConfirm({
           type="checkbox"
           checked={confirmed}
           disabled={busy}
-          onChange={event => setConfirmed(event.target.checked)}
+          onChange={(event) => setConfirmed(event.target.checked)}
         />
         <span>{t('modals.restoreConfirm.confirmCheckbox')}</span>
       </label>
@@ -78,4 +78,3 @@ export function RestoreConfirm({
     </>
   );
 }
-

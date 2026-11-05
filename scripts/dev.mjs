@@ -4,8 +4,15 @@ import electron from 'electron';
 import path from 'node:path';
 const server = await createServer();
 await server.listen();
-const env = { ...process.env, SAVEHUB_DEV_URL: 'http://127.0.0.1:5173/', SAVEHUB_DATA_DIR: path.resolve('.local-data') };
+const env = {
+  ...process.env,
+  SAVEHUB_DEV_URL: 'http://127.0.0.1:5173/',
+  SAVEHUB_DATA_DIR: path.resolve('.local-data'),
+};
 delete env.ELECTRON_RUN_AS_NODE;
 const child = spawn(electron, ['.'], { stdio: 'inherit', env, windowsHide: true });
-child.on('exit', async code => { await server.close(); process.exit(code || 0); });
+child.on('exit', async (code) => {
+  await server.close();
+  process.exit(code || 0);
+});
 process.on('SIGINT', () => child.kill());

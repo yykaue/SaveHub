@@ -15,10 +15,8 @@ export function DeleteConfirmation({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const points = snapshots.every(snapshot => snapshot.kind === 'safety');
-  const destination = points
-    ? t('modals.deleteConfirm.destRemovedPoints')
-    : t('modals.deleteConfirm.destTrash');
+  const points = snapshots.every((snapshot) => snapshot.kind === 'safety');
+  const destination = points ? t('modals.deleteConfirm.destRemovedPoints') : t('modals.deleteConfirm.destTrash');
   const label = permanent
     ? t('modals.deleteConfirm.btnPermanent', { count: snapshots.length })
     : points
@@ -45,7 +43,7 @@ export function DeleteConfirmation({
       )}
       <FavoriteDeleteNotice snapshots={snapshots} permanent={permanent} />
       <ul className="batch-confirm-list">
-        {snapshots.map(snapshot => (
+        {snapshots.map((snapshot) => (
           <li key={snapshot.id} className={snapshot.favorite ? 'favorite-delete-item' : undefined}>
             {snapshot.label}
             {snapshot.favorite && (
@@ -64,7 +62,7 @@ export function DeleteConfirmation({
         </button>
         <button
           className="button danger"
-          disabled={busy || snapshots.some(snapshot => snapshot.protected)}
+          disabled={busy || snapshots.some((snapshot) => snapshot.protected)}
           onClick={onConfirm}
         >
           {label}
@@ -74,33 +72,18 @@ export function DeleteConfirmation({
   );
 }
 
-export function FavoriteDeleteNotice({
-  snapshots,
-  permanent = false,
-}: {
-  snapshots: Snapshot[];
-  permanent?: boolean;
-}) {
-  const count = snapshots.filter(snapshot => snapshot.favorite).length;
+export function FavoriteDeleteNotice({ snapshots, permanent = false }: { snapshots: Snapshot[]; permanent?: boolean }) {
+  const count = snapshots.filter((snapshot) => snapshot.favorite).length;
   if (!count) return null;
   return (
-    <div
-      className="notice favorite-delete-warning"
-      role="note"
-      aria-label={t('modals.deleteConfirm.favWarningAria')}
-    >
+    <div className="notice favorite-delete-warning" role="note" aria-label={t('modals.deleteConfirm.favWarningAria')}>
       <Star size={22} />
       <div>
         <strong>{t('modals.deleteConfirm.favWarningTitle', { count })}</strong>
         <p>
-          {t(
-            permanent
-              ? 'modals.deleteConfirm.favWarningPermanentDesc'
-              : 'modals.deleteConfirm.favWarningSoftDesc',
-          )}
+          {t(permanent ? 'modals.deleteConfirm.favWarningPermanentDesc' : 'modals.deleteConfirm.favWarningSoftDesc')}
         </p>
       </div>
     </div>
   );
 }
-

@@ -1,3 +1,4 @@
+import { AppError } from './errors.mjs';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
@@ -17,8 +18,11 @@ import {
   statMaybe,
   uniqueExportName,
   within,
+  withinOnDisk,
 } from './fs-utils.mjs';
-import { translate } from './i18n.mjs';
+
+import { normalizeRetention } from './retention.mjs';
+import { publicIcon } from './game-icons.mjs';
 
 const digest = (/** @type {string} */ text) => createHash('sha256').update(text).digest('hex');
 const emptyReport = () => ({
@@ -34,35 +38,48 @@ const publicSavePlan = (/** @type {any} */ plan) => ({
   gameId: plan.gameId,
   directory: plan.directory,
   failed: plan.failed,
-  items: plan.items.map((/** @type {any} */ { id, name, source, bytes, fileCount, matches }) => ({ id, name, source, bytes, fileCount, matches })),
+  items: plan.items.map((/** @type {any} */ { id, name, source, bytes, fileCount, matches }) => ({
+    id,
+    name,
+    source,
+    bytes,
+    fileCount,
+    matches,
+  })),
 });
 
 /**
  * @param {any} input
  * @param {any} [existing]
  * @param {string} [lang]
+ * @returns {import('./models').StoredGame}
  */
 export function normalizeGame(input, existing = null, lang = undefined) {
   if (!input || typeof input.name !== 'string' || !input.name.trim() || input.name.length > 80) {
-    throw new Error(translate(lang, 'gameTransfer.gameNameLength'));
+    throw new AppError('gameTransfer.gameNameLength', undefined, lang);
   }
-  /** @type {Record<string, { root: string; items: string[] }>} */
-  const locations = {};
-  for (const platform of ['win32', 'darwin']) {
+  /** @type {Record<'win32' | 'darwin', { root: string; items: string[] }>} */
+  const locations = { win32: { root: '', items: [] }, darwin: { root: '', items: [] } };
+  for (const platform of /** @type {const} */ (['win32', 'darwin'])) {
     const location = input.locations?.[platform] || { root: '', items: [] };
     if (typeof location.root !== 'string' || location.root.length > 4096) {
-      throw new Error(translate(lang, 'gameTransfer.invalidGameRoot'));
+      throw new AppError('gameTransfer.invalidGameRoot', undefined, lang);
     }
     locations[platform] = { root: location.root.trim(), items: cleanItems(location.items, { allowEmpty: true, lang }) };
   }
-  const icon = typeof input.icon === 'string' ? input.icon : 'gamepad';
+  const icon =
+    typeof existing?.icon === 'string' && input.icon === publicIcon(existing)
+      ? existing.icon
+      : typeof input.icon === 'string'
+        ? input.icon
+        : 'gamepad';
   if (
     !['ring', 'spire', 'flame', 'gamepad', 'swords', 'gem', 'ghost', 'rocket'].includes(icon) &&
     !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(icon)
   ) {
-    throw new Error(translate(lang, 'gameTransfer.invalidGameIconFormat'));
+    throw new AppError('gameTransfer.invalidGameIconFormat', undefined, lang);
   }
-  if (icon.length > 3_000_000) throw new Error(translate(lang, 'gameTransfer.gameIconTooLarge'));
+  if (icon.length > 3_000_000) throw new AppError('gameTransfer.gameIconTooLarge', undefined, lang);
   return {
     ...existing,
     id: existing?.id || randomUUID(),
@@ -73,6 +90,10 @@ export function normalizeGame(input, existing = null, lang = undefined) {
     locations,
     legacyRoot: typeof input.legacyRoot === 'string' ? input.legacyRoot.trim().slice(0, 4096) : '',
     createdAt: existing?.createdAt || new Date().toISOString(),
+    restorePointRetention:
+      input.restorePointRetention === undefined
+        ? existing?.restorePointRetention || {}
+        : normalizeRetention(input.restorePointRetention, true, lang),
   };
 }
 
@@ -82,14 +103,14 @@ export function normalizeGame(input, existing = null, lang = undefined) {
  */
 export async function purgeGameSnapshots(store, id) {
   const game = store.game(id, true);
-  if (!game.deletedAt || !game.purgeSnapshotsPending) throw new Error(store.t('gameTransfer.gamePurgeSnapshotsNotConfirmed'));
+  if (!game.deletedAt || !game.purgeSnapshotsPending) throw store.error('gameTransfer.gamePurgeSnapshotsNotConfirmed');
   const directory = path.resolve(store.gameDir(id), 'snapshots');
   if (
     !within(store.vault, directory, store.platform) ||
     directory === path.resolve(store.vault) ||
     path.dirname(directory) !== path.resolve(store.gameDir(id))
   ) {
-    throw new Error(store.t('gameTransfer.gamePurgeSnapshotsOutOfBounds'));
+    throw store.error('gameTransfer.gamePurgeSnapshotsOutOfBounds');
   }
   await assertTreeNoLinks(directory, store.lang);
   const journals = await gameImportJournals(store, id);
@@ -109,14 +130,14 @@ export async function purgeGameSnapshots(store, id) {
  */
 export async function purgeGame(store, id) {
   const game = store.game(id, true);
-  if (!game.deletedAt || !game.purgeGamePending) throw new Error(store.t('gameTransfer.gamePurgeNotConfirmed'));
+  if (!game.deletedAt || !game.purgeGamePending) throw store.error('gameTransfer.gamePurgeNotConfirmed');
   const directory = path.resolve(store.gameDir(id));
   if (
     path.dirname(directory) !== path.resolve(store.vault) ||
     directory === path.resolve(store.vault) ||
     !within(store.vault, directory, store.platform)
   ) {
-    throw new Error(store.t('gameTransfer.gamePurgeOutOfBounds'));
+    throw store.error('gameTransfer.gamePurgeOutOfBounds');
   }
   await assertTreeNoLinks(directory, store.lang);
   const journals = await gameImportJournals(store, id);
@@ -139,12 +160,12 @@ async function gameImportJournals(store, gameId) {
   await assertNoLinks(directory, store.lang);
   if (!(await statMaybe(directory))) return [];
   const result = [];
-  for (const name of (await fs.readdir(directory)).filter(name => name.endsWith('.json'))) {
+  for (const name of (await fs.readdir(directory)).filter((name) => name.endsWith('.json'))) {
     const file = path.join(directory, name);
     await assertNoLinks(file, store.lang);
     const journal = JSON.parse(await fs.readFile(file, 'utf8'));
     if (journal.gameId !== gameId) continue;
-    if (store.importReplacementPaths(journal).file !== file) throw new Error(store.t('storage.importReplaceIdentityMismatch'));
+    if (store.importReplacementPaths(journal).file !== file) throw store.error('storage.importReplaceIdentityMismatch');
     result.push(file);
   }
   return result;
@@ -158,12 +179,12 @@ async function gameImportJournals(store, gameId) {
  */
 export async function removeGame(store, id, undo, deleteRecords) {
   if (typeof undo !== 'boolean' || typeof deleteRecords !== 'boolean' || (undo && deleteRecords)) {
-    throw new Error(store.t('gameTransfer.invalidGameDeleteOptions'));
+    throw store.error('gameTransfer.invalidGameDeleteOptions');
   }
   const game = store.game(id, true);
   const pending = game.purgeGamePending || game.purgeSnapshotsPending;
-  if (undo && pending) throw new Error(store.t('gameTransfer.cannotUndoPendingPurge'));
-  if (pending && !deleteRecords) throw new Error(store.t('gameTransfer.mustRetryPendingPurge'));
+  if (undo && pending) throw store.error('gameTransfer.cannotUndoPendingPurge');
+  if (pending && !deleteRecords) throw store.error('gameTransfer.mustRetryPendingPurge');
   if (deleteRecords && game.purgeGamePending) return purgeGame(store, id);
   const next = { ...game };
   if (undo) delete next.deletedAt;
@@ -185,17 +206,17 @@ export async function removeGame(store, id, undo, deleteRecords) {
  * @param {boolean} includeSnapshots
  */
 export async function exportGames(store, ids, destination, includeSnapshots) {
-  if (typeof includeSnapshots !== 'boolean') throw new Error(store.t('gameTransfer.invalidGameExportOptions'));
+  if (typeof includeSnapshots !== 'boolean') throw store.error('gameTransfer.invalidGameExportOptions');
   const selected = store.validateSelection(ids);
-  if (selected.length > 1000) throw new Error(store.t('gameTransfer.maxGameExportCount'));
-  const games = selected.map(id => store.game(id));
+  if (selected.length > 1000) throw store.error('gameTransfer.maxGameExportCount');
+  const games = selected.map((id) => store.game(id));
   if (typeof destination !== 'string' || !path.isAbsolute(destination)) {
-    throw new Error(store.t('storage.pickExportDirRequired'));
+    throw store.error('storage.pickExportDirRequired');
   }
   destination = path.resolve(destination);
   await assertNoLinks(destination, store.lang);
-  if (within(store.dataDir, destination, store.platform)) {
-    throw new Error(store.t('gameTransfer.cannotExportGamesIntoVault'));
+  if (await withinOnDisk(store.dataDir, destination, store.platform)) {
+    throw store.error('gameTransfer.cannotExportGamesIntoVault');
   }
   const names = new Set((await fs.readdir(destination)).map(foldedName));
   const folder = path.join(
@@ -216,7 +237,7 @@ export async function exportGames(store, ids, destination, includeSnapshots) {
       const target = path.join(stage, directory);
       const config = normalizeGame(game, { id: game.id, createdAt: game.createdAt }, store.lang);
       const snapshots = includeSnapshots ? await store.snapshots(game.id, true) : [];
-      if (snapshots.length > 10000) throw new Error(store.t('gameTransfer.maxSingleGameSnapshotsExport'));
+      if (snapshots.length > 10000) throw store.error('gameTransfer.maxSingleGameSnapshotsExport');
       const totalBytes = snapshots.reduce((sum, item) => sum + (item.bytes || 0), 0);
       await assertDiskSpace(destination, totalBytes, store.lang);
       await atomicJson(path.join(target, 'game.json'), {
@@ -276,18 +297,27 @@ export async function exportGames(store, ids, destination, includeSnapshots) {
     return { folder, count: games.length, snapshotCount };
   } catch (error) {
     for (const target of published) {
-      if (!within(folder, target, store.platform) || target === folder || !within(destination, folder, store.platform)) {
-        throw new Error(store.t('gameTransfer.gameExportCleanupOutOfBounds'));
+      if (
+        !within(folder, target, store.platform) ||
+        target === folder ||
+        !within(destination, folder, store.platform)
+      ) {
+        throw store.error('gameTransfer.gameExportCleanupOutOfBounds');
       }
       await fs.rm(target, { recursive: true, force: true });
     }
-    if (owned) await fs.rmdir(folder).catch(err => store.logger.warn('export-games-rmdir-failed', { folder, error: err.message }));
+    if (owned)
+      await fs
+        .rmdir(folder)
+        .catch((err) => store.logger.warn('export-games-rmdir-failed', { folder, error: err.message }));
     throw error;
   } finally {
     if (!within(destination, stage, store.platform) || stage === destination) {
-      throw new Error(store.t('gameTransfer.gameExportStageOutOfBounds'));
-    }
-    await fs.rm(stage, { recursive: true, force: true }).catch(err => store.logger.warn('export-games-stage-cleanup-failed', { stage, error: err.message }));
+      await store.logger.error('export-games-stage-cleanup-refused', { stage, destination });
+    } else
+      await fs
+        .rm(stage, { recursive: true, force: true })
+        .catch((err) => store.logger.warn('export-games-stage-cleanup-failed', { stage, error: err.message }));
   }
 }
 
@@ -314,10 +344,10 @@ async function readBundle(directory, lang) {
   const file = path.join(directory, 'game.json');
   await assertNoLinks(file, lang);
   const text = await fs.readFile(file, 'utf8');
-  if (Buffer.byteLength(text) > 4_000_000) throw new Error(translate(lang, 'gameTransfer.gameConfigFileTooLarge'));
+  if (Buffer.byteLength(text) > 4_000_000) throw new AppError('gameTransfer.gameConfigFileTooLarge', undefined, lang);
   const data = JSON.parse(text);
   if (data.version !== 1 || data.type !== 'savehub-game' || typeof data.includesSnapshots !== 'boolean') {
-    throw new Error(translate(lang, 'gameTransfer.invalidGameExportFormat'));
+    throw new AppError('gameTransfer.invalidGameExportFormat', undefined, lang);
   }
   if (
     !Number.isSafeInteger(data.snapshotCount) ||
@@ -325,12 +355,19 @@ async function readBundle(directory, lang) {
     data.snapshotCount > 10000 ||
     (!data.includesSnapshots && data.snapshotCount !== 0)
   ) {
-    throw new Error(translate(lang, 'gameTransfer.invalidBundleSnapshotCount'));
+    throw new AppError('gameTransfer.invalidBundleSnapshotCount', undefined, lang);
   }
   safeId(data.game?.id, lang);
   const game = normalizeGame(data.game, { id: data.game.id, createdAt: data.game.createdAt }, lang);
-  if (!Number.isFinite(Date.parse(game.createdAt))) throw new Error(translate(lang, 'gameTransfer.invalidGameCreatedAt'));
-  return { game, file, hash: digest(text), includesSnapshots: data.includesSnapshots, snapshotCount: data.snapshotCount };
+  if (!Number.isFinite(Date.parse(game.createdAt)))
+    throw new AppError('gameTransfer.invalidGameCreatedAt', undefined, lang);
+  return {
+    game,
+    file,
+    hash: digest(text),
+    includesSnapshots: data.includesSnapshots,
+    snapshotCount: data.snapshotCount,
+  };
 }
 
 /**
@@ -340,12 +377,15 @@ async function readBundle(directory, lang) {
 export async function prepareGameImport(store, directory) {
   store.pendingGameImport = null;
   if (typeof directory !== 'string' || !path.isAbsolute(directory)) {
-    throw new Error(store.t('gameTransfer.pickGameImportDirRequired'));
+    throw store.error('gameTransfer.pickGameImportDirRequired');
   }
   directory = path.resolve(directory);
   await assertNoLinks(directory, store.lang);
-  if (within(store.dataDir, directory, store.platform) || within(directory, store.dataDir, store.platform)) {
-    throw new Error(store.t('gameTransfer.cannotImportGameFromVault'));
+  if (
+    (await withinOnDisk(store.dataDir, directory, store.platform)) ||
+    (await withinOnDisk(directory, store.dataDir, store.platform))
+  ) {
+    throw store.error('gameTransfer.cannotImportGameFromVault');
   }
   let directories = [directory];
   const index = path.join(directory, 'games.json');
@@ -359,11 +399,14 @@ export async function prepareGameImport(store, directory) {
       !data.games.length ||
       data.games.length > 1000
     ) {
-      throw new Error(store.t('gameTransfer.invalidGamesBundleIndex'));
+      throw store.error('gameTransfer.invalidGamesBundleIndex');
     }
     const entries = data.games.map((/** @type {string} */ name) => cleanItems([name], { lang: store.lang })[0]);
-    if (entries.some((/** @type {string} */ name) => name.includes('/')) || new Set(entries.map(foldedName)).size !== entries.length) {
-      throw new Error(store.t('gameTransfer.invalidOrDuplicateGamesBundleDir'));
+    if (
+      entries.some((/** @type {string} */ name) => name.includes('/')) ||
+      new Set(entries.map(foldedName)).size !== entries.length
+    ) {
+      throw store.error('gameTransfer.invalidOrDuplicateGamesBundleDir');
     }
     directories = entries.map((/** @type {string} */ name) => path.join(directory, name));
   }
@@ -374,7 +417,7 @@ export async function prepareGameImport(store, directory) {
     try {
       const bundle = await readBundle(folder, store.lang);
       if (seen.has(bundle.game.id) || seen.has(`name:${foldedName(bundle.game.name)}`)) {
-        throw new Error(store.t('gameTransfer.duplicateGameInBundle'));
+        throw store.error('gameTransfer.duplicateGameInBundle');
       }
       seen.add(bundle.game.id);
       seen.add(`name:${foldedName(bundle.game.name)}`);
@@ -391,7 +434,7 @@ export async function prepareGameImport(store, directory) {
     id: plan.id,
     directory,
     failed: plan.failed,
-    items: plan.items.map(item => ({
+    items: plan.items.map((item) => ({
       id: item.id,
       game: item.game,
       source: item.directory,
@@ -407,7 +450,7 @@ export async function prepareGameImport(store, directory) {
  */
 function requirePlan(store, id) {
   if (!store.pendingGameImport || store.pendingGameImport.id !== id) {
-    throw new Error(store.t('gameTransfer.gameImportPlanExpired'));
+    throw store.error('gameTransfer.gameImportPlanExpired');
   }
   return store.pendingGameImport;
 }
@@ -419,8 +462,8 @@ function requirePlan(store, id) {
 async function checkGames(store, plan) {
   for (const item of plan.items) {
     const data = await readBundle(item.directory, store.lang);
-    if (data.hash !== item.hash) throw new Error(store.t('gameTransfer.gameImportSourceChanged'));
-    if (!equal(matches(store, item), item.matches)) throw new Error(store.t('gameTransfer.gameConfigOrMatchesChanged'));
+    if (data.hash !== item.hash) throw store.error('gameTransfer.gameImportSourceChanged');
+    if (!equal(matches(store, item), item.matches)) throw store.error('gameTransfer.gameConfigOrMatchesChanged');
   }
 }
 
@@ -435,19 +478,19 @@ export async function reviewGameImport(store, planId, decisions) {
   await checkGames(store, plan);
   const duplicates = plan.items.filter((/** @type {any} */ item) => item.matches.length);
   if (!Array.isArray(decisions) || decisions.length !== duplicates.length) {
-    throw new Error(store.t('gameTransfer.missingGameDuplicateDecisions'));
+    throw store.error('gameTransfer.missingGameDuplicateDecisions');
   }
   const choices = new Map(),
     targets = new Set();
   for (const choice of decisions) {
     const item = duplicates.find((/** @type {any} */ item) => item.id === choice?.itemId);
     if (!item || choices.has(item.id) || !['overwrite', 'skip', 'keep-both'].includes(choice.action)) {
-      throw new Error(store.t('gameTransfer.invalidGameDuplicateDecision'));
+      throw store.error('gameTransfer.invalidGameDuplicateDecision');
     }
     if (choice.action === 'overwrite') {
       const target = item.matches.find((/** @type {any} */ game) => game.id === choice.targetId);
       if (!target || targets.has(target.id) || target.purgeGamePending || target.purgeSnapshotsPending) {
-        throw new Error(store.t('gameTransfer.invalidGameOverwriteTarget'));
+        throw store.error('gameTransfer.invalidGameOverwriteTarget');
       }
       targets.add(target.id);
     }
@@ -484,18 +527,20 @@ export async function reviewGameImport(store, planId, decisions) {
     if (item.includesSnapshots && item.snapshotCount > 0) {
       // Only the named, verified export format is accepted inside a game bundle.
       if (!(await store.exportIndexCandidates(source))) {
-        throw new Error(store.t('gameTransfer.missingBundleSnapshotIndex'));
+        throw store.error('gameTransfer.missingBundleSnapshotIndex');
       }
       snapshotPlan = await store.prepareImportPlan(game.id, source, { game, bundle: true });
       if (
         snapshotPlan.items.length + snapshotPlan.failed.length !== item.snapshotCount ||
         snapshotPlan.items.some((/** @type {any} */ save) => save.meta.gameId !== item.game.id)
       ) {
-        throw new Error(store.t('gameTransfer.bundleSnapshotCountOrOwnerMismatch'));
+        throw store.error('gameTransfer.bundleSnapshotCountOrOwnerMismatch');
       }
       // Keep the exact index bytes to reject metadata edits between review and execution.
       snapshotPlan.indexHash = await indexHash(source, store.lang);
-      failed.push(...snapshotPlan.failed.map((/** @type {any} */ error) => ({ ...error, name: `${game.name} / ${error.name}` })));
+      failed.push(
+        ...snapshotPlan.failed.map((/** @type {any} */ error) => ({ ...error, name: `${game.name} / ${error.name}` })),
+      );
     }
     resolved.push({ item, action: choice?.action || 'import', game, snapshotPlan });
   }
@@ -504,7 +549,7 @@ export async function reviewGameImport(store, planId, decisions) {
     id: plan.review.id,
     planId,
     failed,
-    games: resolved.map(entry => ({
+    games: resolved.map((entry) => ({
       itemId: entry.item.id,
       name: entry.game?.name || entry.item.game.name,
       action: entry.action,
@@ -521,7 +566,7 @@ async function indexHash(directory, lang) {
   const root = path.join(directory, '.savehub-exports');
   await assertNoLinks(root, lang);
   const parts = [];
-  for (const file of (await fs.readdir(root)).filter(name => name.endsWith('.json')).sort()) {
+  for (const file of (await fs.readdir(root)).filter((name) => name.endsWith('.json')).sort()) {
     await assertNoLinks(path.join(root, file), lang);
     parts.push([file, await fs.readFile(path.join(root, file), 'utf8')]);
   }
@@ -536,25 +581,28 @@ async function indexHash(directory, lang) {
 export async function executeGameImport(store, reviewId, decisions) {
   const plan = store.pendingGameImport,
     review = plan?.review;
-  if (!review || review.id !== reviewId) throw new Error(store.t('gameTransfer.gameImportReviewExpired'));
+  if (!review || review.id !== reviewId) throw store.error('gameTransfer.gameImportReviewExpired');
   await checkGames(store, plan);
   const expected = review.resolved.filter((/** @type {any} */ entry) => entry.snapshotPlan);
   if (!Array.isArray(decisions) || decisions.length !== expected.length) {
-    throw new Error(store.t('gameTransfer.missingGameSaveDecisions'));
+    throw store.error('gameTransfer.missingGameSaveDecisions');
   }
   const saveChoices = new Map();
   for (const decision of decisions) {
     const entry = expected.find((/** @type {any} */ entry) => entry.item.id === decision?.itemId);
-    if (!entry || saveChoices.has(entry.item.id)) throw new Error(store.t('gameTransfer.invalidGameSaveDecision'));
+    if (!entry || saveChoices.has(entry.item.id)) throw store.error('gameTransfer.invalidGameSaveDecision');
     const snapshotPlan = entry.snapshotPlan;
     if ((await indexHash(snapshotPlan.directory, store.lang)) !== snapshotPlan.indexHash) {
-      throw new Error(store.t('gameTransfer.bundleSnapshotIndexChanged'));
+      throw store.error('gameTransfer.bundleSnapshotIndexChanged');
     }
     const choices = await store.validateImportPlan(snapshotPlan, decision.decisions);
     for (const item of snapshotPlan.items) {
       if (choices.get(item.id)?.action === 'skip') continue;
-      const data = await inventory(item.source, item.entries, { allowMissing: Boolean(item.allowMissing), lang: store.lang });
-      if (fingerprint(data) !== item.fingerprint) throw new Error(store.t('gameTransfer.bundleSnapshotSourceChanged'));
+      const data = await inventory(item.source, item.entries, {
+        allowMissing: Boolean(item.allowMissing),
+        lang: store.lang,
+      });
+      if (fingerprint(data) !== item.fingerprint) throw store.error('gameTransfer.bundleSnapshotSourceChanged');
     }
     saveChoices.set(entry.item.id, choices);
   }
@@ -569,9 +617,9 @@ export async function executeGameImport(store, reviewId, decisions) {
     }
     try {
       await store.commitGame(entry.game);
-      report.games[entry.action === 'overwrite' ? 'overwritten' : entry.action === 'keep-both' ? 'keptBoth' : 'imported'].push(
-        entry.game.name,
-      );
+      report.games[
+        entry.action === 'overwrite' ? 'overwritten' : entry.action === 'keep-both' ? 'keptBoth' : 'imported'
+      ].push(entry.game.name);
       if (entry.snapshotPlan) {
         report.snapshots.push({
           gameName: entry.game.name,

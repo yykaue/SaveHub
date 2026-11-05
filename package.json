@@ -1,20 +1,22 @@
 {
   "name": "savehub",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "private": true,
   "description": "SaveHub · 珍藏每一次冒险。跨平台游戏存档管理器。",
   "author": "SaveHub",
   "type": "module",
   "main": "electron/main.mjs",
   "packageManager": "pnpm@11.25.0",
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "dev": "node scripts/dev.mjs",
     "dev:renderer": "vite --host 127.0.0.1",
     "start": "electron .",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs",
+    "typecheck": "node node_modules/@typescript/native/bin/tsc --noEmit",
+    "test": "node --test --test-timeout=60000 tests/*.test.mjs",
     "test:ui": "node scripts/smoke.mjs",
     "test:interactions": "node scripts/interactions.mjs",
     "test:deletion": "node scripts/deletion-interactions.mjs",
@@ -23,43 +25,98 @@
     "build:icons": "node scripts/build-icons.mjs",
     "test:portable": "node scripts/portable-smoke.mjs",
     "audit:release": "node scripts/audit-release.mjs",
-    "build": "tsc --noEmit && vite build",
-    "pack:win": "tsc --noEmit && vite build && electron-builder --win --x64 --dir --publish never",
-    "dist:win": "tsc --noEmit && vite build && electron-builder --win --x64 --publish never",
-    "pack:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64 --dir --publish never",
-    "dist:mac": "tsc --noEmit && vite build && electron-builder --mac --arm64 --publish never"
+    "build": "node scripts/generate-preload.mjs --check && node node_modules/@typescript/native/bin/tsc --noEmit && vite build",
+    "pack:win": "node scripts/generate-preload.mjs --check && node node_modules/@typescript/native/bin/tsc --noEmit && vite build && electron-builder --win --x64 --dir --publish never",
+    "dist:win": "node scripts/generate-preload.mjs --check && node node_modules/@typescript/native/bin/tsc --noEmit && vite build && electron-builder --win --x64 --publish never",
+    "pack:mac": "node scripts/generate-preload.mjs --check && node node_modules/@typescript/native/bin/tsc --noEmit && vite build && electron-builder --mac --arm64 --dir --publish never",
+    "dist:mac": "node scripts/generate-preload.mjs --check && node node_modules/@typescript/native/bin/tsc --noEmit && vite build && electron-builder --mac --arm64 --publish never",
+    "lint": "eslint src electron shared scripts tests vite.config.ts playwright.config.ts",
+    "format": "prettier --write src electron shared scripts tests package.json tsconfig.json vite.config.ts playwright.config.ts eslint.config.mjs .prettierrc.json .github",
+    "format:check": "prettier --check src electron shared scripts tests package.json tsconfig.json vite.config.ts playwright.config.ts eslint.config.mjs .prettierrc.json .github",
+    "generate:preload": "node scripts/generate-preload.mjs",
+    "check:contracts": "node scripts/generate-preload.mjs --check",
+    "test:e2e": "playwright test",
+    "test:retention": "node scripts/retention-interactions.mjs",
+    "checksums": "node scripts/checksums.mjs"
   },
   "devDependencies": {
-    "lucide-react": "1.63.0",
-    "react": "19.3.1",
-    "react-dom": "19.3.1",
+    "@eslint/js": "10.0.1",
     "@playwright/test": "1.64.1",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@typescript/native": "npm:typescript@7.0.2",
     "@vitejs/plugin-react": "6.1.2",
     "electron": "45.1.0",
     "electron-builder": "26.18.0",
-    "typescript": "7.0.2",
+    "eslint": "10.14.0",
+    "lucide-react": "1.63.0",
+    "prettier": "3.9.10",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript-eslint": "8.72.1",
     "vite": "8.3.5"
   },
   "build": {
     "appId": "app.savehub.desktop",
     "productName": "SaveHub",
     "asar": true,
-    "directories": { "output": "release/1.1.4" },
-    "files": ["dist/**/*", "electron/**/*", "build/icon.png", "build/icon.ico", "package.json"],
+    "directories": {
+      "output": "release/1.1.5"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.png",
+      "build/icon.ico",
+      "package.json",
+      "shared/**/*"
+    ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.ico",
       "signAndEditExecutable": true,
       "signExecutable": false
     },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "deleteAppDataOnUninstall": false },
-    "portable": { "artifactName": "SaveHub-${version}-Windows-x64-portable.exe" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "SaveHub-${version}-Windows-x64-portable.exe"
+    },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["arm64"] }, { "target": "zip", "arch": ["arm64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "category": "public.app-category.utilities",
       "icon": "build/icon.png",
       "hardenedRuntime": true,

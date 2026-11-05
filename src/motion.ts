@@ -15,8 +15,10 @@ export function animate(update: () => void) {
   // A new interaction may intentionally skip the visual animation while the
   // update callback still commits. Its ready promise rejects in that case.
   void transition.ready.catch(() => {});
-  void transition.finished.catch(() => {}).finally(() => {
-    if (active === transition) active = undefined;
-  });
+  void transition.finished
+    .catch(() => {})
+    .finally(() => {
+      if (active === transition) active = undefined;
+    });
   return transition.updateCallbackDone;
 }

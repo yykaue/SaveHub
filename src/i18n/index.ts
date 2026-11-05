@@ -35,7 +35,7 @@ type DotPath<T, Prefix extends string = ''> = {
 export type TranslationKey = DotPath<TranslationSchema>;
 
 export function normalizeLanguage(value?: string | null): Language {
-  return SUPPORTED_LANGUAGES.some(item => item.code === value) ? (value as Language) : DEFAULT_LANGUAGE;
+  return SUPPORTED_LANGUAGES.some((item) => item.code === value) ? (value as Language) : DEFAULT_LANGUAGE;
 }
 
 let currentLanguage: Language = normalizeLanguage(
@@ -52,7 +52,7 @@ export function setLanguage(language: Language) {
   const next = normalizeLanguage(language);
   if (next === currentLanguage) return;
   currentLanguage = next;
-  listeners.forEach(listener => listener());
+  listeners.forEach((listener) => listener());
 }
 
 export function getLanguage(): Language {
@@ -61,12 +61,12 @@ export function getLanguage(): Language {
 
 export function getLanguageMeta(language: Language = currentLanguage): LanguageMeta {
   const normalized = normalizeLanguage(language);
-  return SUPPORTED_LANGUAGES.find(item => item.code === normalized) || SUPPORTED_LANGUAGES[0];
+  return SUPPORTED_LANGUAGES.find((item) => item.code === normalized) || SUPPORTED_LANGUAGES[0];
 }
 
 export function getNextLanguage(language: Language = currentLanguage): LanguageMeta {
   const normalized = normalizeLanguage(language);
-  const index = SUPPORTED_LANGUAGES.findIndex(item => item.code === normalized);
+  const index = SUPPORTED_LANGUAGES.findIndex((item) => item.code === normalized);
   return SUPPORTED_LANGUAGES[(index + 1) % SUPPORTED_LANGUAGES.length];
 }
 

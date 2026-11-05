@@ -1,10 +1,16 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, Menu, protocol } from 'electron';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdir } from 'node:fs/promises';
 import { SaveStore } from './storage.mjs';
-import { makePresets } from './presets.mjs';
+import { AppError, serializeError } from './errors.mjs';
+import { IPC_SCHEMA, validArguments } from '../shared/ipc-schema.mjs';
 import { translate } from './i18n.mjs';
+import { iconResponse } from './game-icons.mjs';
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'savehub-icon', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.dirname(here);
@@ -40,7 +46,7 @@ if (!locked) {
     .whenReady()
     .then(async () => {
       store = new SaveStore(app.getPath('userData'), {
-        onProgress: progress => {
+        onProgress: (progress) => {
           const now = Date.now();
           const isFinal = !progress || Boolean(progress.total && progress.completed >= progress.total);
           if (!isFinal && now - lastProgressTime < 80) return;
@@ -48,14 +54,33 @@ if (!locked) {
           if (window && !window.isDestroyed()) window.webContents.send('savehub:progress', progress);
         },
       });
-      await store.init(await makePresets());
+      try {
+        await store.init();
+      } catch (error) {
+        const problem = /** @type {Error & { code?: string; recoveryAvailable?: boolean }} */ (error);
+        if (problem.code !== 'LIBRARY_CORRUPT' || !problem.recoveryAvailable) throw error;
+        const answer = await dialog.showMessageBox({
+          type: 'warning',
+          title: t('dialogs.restoreLibraryTitle'),
+          message: t('dialogs.restoreLibraryMessage'),
+          detail: t('dialogs.restoreLibraryDetail'),
+          buttons: [t('dialogs.restoreLibraryConfirm'), t('dialogs.cancel')],
+          defaultId: 1,
+          cancelId: 1,
+        });
+        if (answer.response !== 0) throw error;
+        await store.init([], { recoverPrevious: true });
+      }
       registerHandlers();
+      protocol.handle('savehub-icon', (request) =>
+        store ? iconResponse(store, request.url) : new Response(null, { status: 503 }),
+      );
       createWindow();
       app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
       });
     })
-    .catch(error => {
+    .catch((error) => {
       dialog.showErrorBox(t('dialogs.startupErrorTitle'), /** @type {Error} */ (error).message);
       app.quit();
     });
@@ -64,7 +89,7 @@ if (!locked) {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', event => {
+app.on('before-quit', (event) => {
   if (store?.busy) {
     event.preventDefault();
     dialog.showMessageBox({ type: 'info', message: t('dialogs.busyQuitMessage'), detail: t('dialogs.busyQuitDetail') });
@@ -124,10 +149,14 @@ function createWindow() {
   });
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   window.webContents.session.setPermissionCheckHandler(() => false);
-  window.on('close', event => {
+  window.on('close', (event) => {
     if (store?.busy && window) {
       event.preventDefault();
-      dialog.showMessageBox(window, { type: 'info', message: t('dialogs.busyCloseMessage'), detail: t('dialogs.busyCloseDetail') });
+      dialog.showMessageBox(window, {
+        type: 'info',
+        message: t('dialogs.busyCloseMessage'),
+        detail: t('dialogs.busyCloseDetail'),
+      });
     }
   });
   window.once('ready-to-show', () => window?.show());
@@ -138,11 +167,14 @@ function createWindow() {
 function registerHandlers() {
   if (!store) return;
   const activeStore = store;
+  const registered = new Set();
   /**
-   * @param {string} name
-   * @param {(...args: any[]) => Promise<any> | any} handler
+   * @template {import('../shared/contracts').CommandName} K
+   * @param {K} name
+   * @param {(...args: Parameters<import('../shared/contracts').Commands[K]>) => ReturnType<import('../shared/contracts').Commands[K]> | Awaited<ReturnType<import('../shared/contracts').Commands[K]>>} handler
    */
-  const register = (name, handler) =>
+  const register = (name, handler) => {
+    registered.add(name);
     ipcMain.handle(`savehub:${name}`, async (event, ...args) => {
       try {
         if (
@@ -153,28 +185,51 @@ function registerHandlers() {
         ) {
           throw new Error(t('ipc.untrustedOrigin'));
         }
-        return { ok: true, data: await handler(...args) };
+        if (!validArguments(name, args)) throw new AppError('errors.invalidArguments', undefined, activeStore.lang);
+        const parameters = /** @type {Parameters<import('../shared/contracts').Commands[K]>} */ (args);
+        const update = name === 'updateSnapshot' || name === 'updateSnapshots';
+        const changes = update ? /** @type {{ deleted?:boolean }} */ (args[2]) : undefined;
+        const operation = update
+          ? changes?.deleted === false
+            ? 'recover'
+            : changes?.deleted === true
+              ? 'delete'
+              : 'settings'
+          : name;
+        return {
+          ok: true,
+          data:
+            name === 'state'
+              ? await handler(...parameters)
+              : await activeStore.logger.run(operation, async () => handler(...parameters), {
+                  method: name,
+                  ...(typeof args[0] === 'string' && /Snapshot|Folder|Game/.test(name) ? { gameId: args[0] } : {}),
+                  ...(name.endsWith('Snapshot') && typeof args[1] === 'string' ? { snapshotId: args[1] } : {}),
+                }),
+        };
       } catch (error) {
         const message = /** @type {Error} */ (error).message || t('ipc.operationFailed');
         await activeStore.logger.warn('ipc-error', { method: name, error: message });
-        return { ok: false, error: message };
+        return { ok: false, error: serializeError(error, activeStore.lang) };
       }
     });
+  };
   /**
    * @param {string} title
    */
-  const chooseFolder = async title => {
+  const chooseFolder = async (title) => {
     if (!window) return null;
     const result = await dialog.showOpenDialog(window, { title, properties: ['openDirectory', 'createDirectory'] });
     return result.canceled ? null : result.filePaths[0];
   };
   register('state', async () => ({ ...(await activeStore.state()), version: app.getVersion() }));
-  register('setTheme', theme => activeStore.setTheme(theme));
-  register('setLanguage', async language => {
+  register('setTheme', (theme) => activeStore.setTheme(theme));
+  register('setRestorePointRetention', (value) => activeStore.setRestorePointRetention(value));
+  register('setLanguage', async (language) => {
     await activeStore.setLanguage(language);
     updateApplicationMenu();
   });
-  register('saveGame', game => activeStore.upsertGame(game));
+  register('saveGame', (game) => activeStore.upsertGame(game));
   register('removeGame', (id, undo = false, deleteRecords = false) => activeStore.removeGame(id, undo, deleteRecords));
   register('exportGames', async (ids, includeSnapshots = false) => {
     const directory = await chooseFolder(t('dialogs.pickGameExportDir'));
@@ -186,7 +241,7 @@ function registerHandlers() {
   });
   register('reviewGameImport', (id, decisions) => activeStore.reviewGameImport(id, decisions));
   register('executeGameImport', (id, decisions) => activeStore.executeGameImport(id, decisions));
-  register('cancelGameImport', id => activeStore.cancelGameImport(id));
+  register('cancelGameImport', (id) => activeStore.cancelGameImport(id));
   register('pickDirectory', () => chooseFolder(t('dialogs.pickSaveDir')));
   register('pickIcon', async () => {
     if (!window) return null;
@@ -214,7 +269,7 @@ function registerHandlers() {
     return directory ? activeStore.prepareImport(id, directory) : null;
   });
   register('executeImport', (planId, decisions) => activeStore.executeImport(planId, decisions));
-  register('cancelImport', planId => activeStore.cancelImport(planId));
+  register('cancelImport', (planId) => activeStore.cancelImport(planId));
   register('exportSnapshot', async (gameId, id) => {
     const directory = await chooseFolder(t('dialogs.pickExportDir'));
     return directory ? activeStore.exportSnapshot(gameId, id, directory) : null;
@@ -230,12 +285,21 @@ function registerHandlers() {
     else if (kind === 'logs') {
       directory = activeStore.logger.logDir;
       await mkdir(directory, { recursive: true });
-    } else if (kind === 'game') directory = (await activeStore.location(activeStore.game(gameId))).root;
-    else if (kind === 'snapshots') {
+    } else if (kind === 'game') {
+      if (!gameId) throw new AppError('errors.invalidArguments', undefined, activeStore.lang);
+      directory = (await activeStore.location(activeStore.game(gameId))).root;
+    } else if (kind === 'snapshots') {
+      if (!gameId) throw new AppError('errors.invalidArguments', undefined, activeStore.lang);
       directory = path.join(activeStore.gameDir(activeStore.game(gameId).id), 'snapshots');
       await mkdir(directory, { recursive: true });
     } else throw new Error(t('ipc.unsupportedFolderKind'));
     const error = await shell.openPath(directory);
     if (error) throw new Error(error);
   });
+  if (
+    registered.size !== Object.keys(IPC_SCHEMA).length ||
+    Object.keys(IPC_SCHEMA).some((name) => !registered.has(name))
+  ) {
+    throw new Error('IPC handlers do not match the shared contract');
+  }
 }

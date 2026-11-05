@@ -6,14 +6,14 @@
 
 ## 开始使用
 
-Windows：打开 `release/1.1.4/win-unpacked/SaveHub.exe`，或使用 `release/1.1.4/` 下的安装包、便携版。整个 `win-unpacked` 文件夹需要一起保留，不能只复制其中的 EXE。先关闭正在运行的旧版，再打开新版；已有资料库可直接使用。
+Windows：打开 `release/1.1.5/win-unpacked/SaveHub.exe`，或使用 `release/1.1.5/` 下的安装包、便携版。整个 `win-unpacked` 文件夹需要一起保留，不能只复制其中的 EXE。先关闭正在运行的旧版，再打开新版；已有资料库可直接使用。
 
-1. 选择游戏，打开「游戏设置」。确认当前系统的**游戏存档根目录**与**要备份的相对路径**。
+1. 首次启动时资料库为空，点击「添加游戏」，可选模板或从空白开始。打开「游戏设置」。确认当前系统的**游戏存档根目录**与**要备份的相对路径**。
 2. 关闭游戏，点击「创建新存档」，填写名称与备注。
 3. 点击某份存档的「读档」，确认游戏及会写入文件的云同步已关闭。应用先自动保存当前进度并校验，成功后才恢复选中的内容；自动保存失败会停止读档。
 4. 要撤销读档，在时光轴右侧的「读档恢复点」中找到 `读档前 · …`，点击恢复即可。
 
-预置游戏可编辑或移除，也可以添加任意游戏。图标支持内置图形与本地 PNG / JPG / WebP / ICO 图片。图片导入后会复制到配置中，不依赖原文件继续存在。
+模板创建的游戏可编辑或移除，也可以添加任意游戏。图标支持内置图形与本地 PNG / JPG / WebP / ICO 图片。图片导入后会复制到配置中，不依赖原文件继续存在。
 
 ## 全部游戏
 
@@ -24,19 +24,11 @@ Windows：打开 `release/1.1.4/win-unpacked/SaveHub.exe`，或使用 `release/1
 - 导入时选择整个游戏导出文件夹，也可选择其中的单个游戏文件夹。重复游戏按标识或名称匹配，提供逐项及批量「覆盖、跳过、两者并存」；覆盖只更新配置并保留已有存档，跳过游戏也跳过随包存档。
 - 含存档的包在下一步单独处理存档冲突，沿用现有覆盖限制及事务回滚。游戏和存档在最终点击「执行导入」前均不写入；任一步取消都不修改资料库。导入后请检查本机游戏路径。
 
-完整格式和验证说明见 [游戏管理说明与验收](docs/游戏管理.md)。当前变更在源码与 `dist/` 中，已有 `release/1.1.4/` 安装包不包含这些新增功能，需重新打包后交付。
+完整格式和验证说明见 [游戏管理说明与验收](docs/游戏管理.md)。当前 1.1.5 整改与实际包验证范围见[整改执行结果](docs/savehub_remediation_result.md)。
 
-## 参考脚本与对应关系
+## 可选模板与旧存档导入
 
-已阅读这三个目录中的 `save.sh` / `load.sh`：
-
-| 游戏 | 原脚本的游戏根目录（target） | 备份项目（array） |
-| --- | --- | --- |
-| 杀戮尖塔 | `D:\Steam\steamapps\common\SlayTheSpire` | `betaPreferences`、`preferences`、`saves` |
-| 艾尔登法环 | `%USERPROFILE%\AppData\Roaming\EldenRing` | `Steam账户ID` |
-| 黑暗之魂 II | `%USERPROFILE%\AppData\Roaming\DarkSoulsII` | `Steam账户ID` |
-
-首次在 Windows 启动时，会尝试读取用户桌面对应目录的 `save.sh`，只解析 `source` / `target` / `array` 的字面量，**不会执行脚本**。没有脚本时使用上述根目录预设；艾尔登法环与黑暗之魂 II 不预置账号目录，需在「游戏设置」中填写自己的 `Steam账户ID` 目录。路径、账号目录都可以手动修改。
+新资料库为空。添加游戏时可选择艾尔登法环、杀戮尖塔、黑暗之魂 II 模板，填写名称、图标和常用存档项；实际存档根目录及 Steam 账号子目录由用户选择。应用不会自动读取桌面的 shell 脚本，也不注入作者电脑的 Steam 路径。
 
 旧脚本的 `source` 对应原备份目录。应用创建的新存档使用独立资料库和 UUID，不再根据目录数量决定编号，也不会覆盖旧的 `ArchiveFile…`。
 
@@ -133,7 +125,7 @@ SaveHub/
 
 存档不是压缩包，可以直接检查其文件。读档只替换配置的相对路径，其他游戏文件不受影响；被替换目录内新出现的文件会移除，以保持完整恢复语义。读档恢复点也会记录原本不存在的路径，恢复它时这些路径会重新不存在。
 
-复制先写入暂存目录，再比较源文件、复制文件和校验清单；验证成功后才提交。恢复先验证备份，再生成自动恢复点，再在目标磁盘暂存，通过逐项重命名替换。恢复失败时还原原文件；异常中断后根据事务日志恢复。失败暂存目录和日志保留供诊断。它们可能占用额外空间。普通移除只改变记录状态，不释放文件；在回收站或已移除的恢复点中执行永久删除才释放相应备份内容。应用不会自动清理恢复点。
+复制先写入暂存目录，再比较源文件、复制文件和校验清单；验证成功后才提交。恢复先验证备份，再生成自动恢复点，再在目标磁盘暂存，通过逐项重命名替换。恢复失败时还原原文件；异常中断后根据事务日志恢复。失败暂存目录和日志保留供诊断。它们可能占用额外空间。普通移除只改变记录状态，不释放文件；在回收站或已移除的恢复点中执行永久删除才释放相应备份内容。恢复点按下述数量规则自动清理。
 
 永久删除前检查整批记录身份、删除状态、保护标记和路径安全。每份记录开始删除前持久化清理状态；若文件占用或应用中断，重新打开后仍显示“永久删除未完成”，可再次永久删除以继续清理。已开始清理的记录可能不完整，禁止找回、编辑、保护或导出；批量结果会分别列出成功与失败。
 
@@ -147,25 +139,42 @@ SaveHub/
 
 最低系统要求依据当前 Electron 运行时：Windows 10 及以上，macOS 13 Ventura 及以上。Mac 发行目标只配置 **arm64**，不构建 Intel 版本。Windows 当前提供 x64 版本。
 
-2026-11-03 已在 Apple Silicon Mac（macOS 26.6）完成源码测试、四项 GUI 测试和 `pnpm dist:mac` 打包，并在打包后的 `.app` 上通过基础 GUI 测试。Mac 包使用 ad-hoc 签名（`build.mac.identity: "-"`），可避免未签名包下载后被提示“已损坏”；其他 Mac 首次打开仍需在“隐私与安全性”中允许。发布给其他用户前，需要配置 Apple Developer 签名与公证（届时删除 `identity: "-"`）；本项目未包含证书或公证凭据。Windows 包也未配置代码签名。
+历史版本验证（不代表本轮 1.1.5）：2026-11-03 已在 Apple Silicon Mac（macOS 26.6）完成源码测试、四项 GUI 测试和 `pnpm dist:mac` 打包，并在打包后的 `.app` 上通过基础 GUI 测试。Mac 包使用 ad-hoc 签名（`build.mac.identity: "-"`），可避免未签名包下载后被提示“已损坏”；其他 Mac 首次打开仍需在“隐私与安全性”中允许。发布给其他用户前，需要配置 Apple Developer 签名与公证（届时删除 `identity: "-"`）；本项目未包含证书或公证凭据。Windows 包也未配置代码签名。
+
+
+## 恢复点保留与日志
+
+- 每游戏默认保留 **5 个读档恢复点 / 15 个已移除的恢复点**。设置页配置全局数量，游戏设置可分别覆盖或继承全局。只接受包含 0 的安全自然数，**0 表示不保留**。
+- 两队列均按记录的**修改时间 updatedAt**淘汰最早记录。活动队列超额先移入已移除队列，后者超额物理删除，不额外弹出提示；收藏或保护标记不豁免恢复点数量限制。普通存档不受此策略影响。
+- 活动上限为 N，本次找回 K 条，须满足 **N > 0 且 1 ≤ K ≤ N**。超限整批拒绝，N=0 时单个和批量均不可找回。找回后修改时间更新为当前时间，保留创建时间，再统一清理两队列；活动队列已满仍可找回符合数量限制的记录。
+- 包括 0/0 设置在内，事务 safety 副本均保留到提交或失败恢复完成。旧库采用 5/15，缺失 updatedAt 时使用合法创建时间；旧 maxRestorePoints=0 不再表示无限保留。升级现有库前请确认新数量规则。
+- 运行日志按类型和操作分类，**全部文件共用 20 MiB（20,971,520 字节）上限**，全局删除最早的完整记录；迁移旧轮转日志。事务恢复文件不受日志清理影响。设置页可打开日志目录。
 
 ## 开发与构建
 
 完整操作步骤见 [开发、构建、运行与发布指南](docs/开发与发布指南.md)，包括环境安装、所有项目命令、生产预览、实际安装包验证、摘要审计、Windows / macOS 打包、CI、远程发布及中断恢复。
 
-截至 2026-11-02，源码已包含当前标签页的批量导出、保护调整、重复导入的逐项确认，以及回收站保护按钮隐藏和新的 SaveHub Logo，尚未重新打包进现有的 1.1.4 安装包。指南区分了当前源码与历史发行包的验证范围；下一次发行需使用新版本目录完成打包和包内验收。
+1.1.5 的源码、检查和实际 Windows 包证据见[整改执行结果](docs/savehub_remediation_result.md)。历史 1.1.4 产物与验收继续保留，macOS Apple Silicon 的本轮实机验证需在对应平台运行。
 
 SaveHub 的新 Logo 以 S 形存档轨迹与保存节点组成，采用深青、浅色与红色。应用侧栏、启动页、关于与帮助、浏览器标签和桌面图标使用同一设计；SVG、1024 像素 PNG 与多尺寸 Windows ICO 位于 `build/`。修改与生成方式见 [Logo 资源说明](build/README.md)。
 
 Git 管理源码、测试脚本、构建配置、pnpm 锁文件、`build/` 中的图标及手写文档。依赖、构建产物、本地存档、测试数据、自动生成的截图与验收 JSON、日志和本机环境配置由 `.gitignore` 排除；忽略规则不会删除现有文件。
 
-`docs/screenshots/` 和发行审计 JSON 是本机或 CI 验证产物，可通过下方测试与审计命令生成。环境变量示例 `.env.example` 及共享 VS Code 配置可以提交。
+本轮报告、截图和 trace 写入 `test-results/`，`docs/screenshots/` 保留历史证据；发行审计 JSON 由本机或 CI 检查生成。环境变量示例 `.env.example` 及共享 VS Code 配置可以提交。
 
 环境：Node.js 22.12+（建议 24），pnpm 11.25.0。
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm dev                 # Vite + Electron，使用 .local-data
+pnpm lint
+pnpm format:check
+pnpm check:contracts
+pnpm test:e2e            # Playwright 运行器、独立报告和 trace
+node scripts/test-package.mjs # 验证当前平台的实际应用包
+node scripts/benchmark.mjs    # 摘要缓存与真实文件读写测量
+node scripts/benchmark-ui.mjs # 100 / 1,000 / 10,000 条摘要的界面测量
+pnpm checksums
 pnpm test                # 临时文件上的真实存储测试
 pnpm build               # 类型检查 + 前端生产构建
 pnpm build:icons         # 修改 Logo SVG 后重新生成 PNG 和 Windows ICO
@@ -178,21 +187,26 @@ pnpm dist:win            # Windows 安装版 + 便携版
 pnpm pack:mac            # macOS arm64 解包版（.app）
 pnpm dist:mac            # 在 Mac 上构建 arm64 DMG + ZIP
 pnpm test:portable       # Windows 便携版的解包、启动与存读档验证
-pnpm audit:release       # 核对 Windows 包内代码与发行文件摘要
+pnpm audit:release       # 核对当前平台包内代码与发行文件摘要
 ```
 
 构建完成后 `pnpm start` 可使用 Electron 打开生产界面。所有依赖版本已固定，并提供 `pnpm-lock.yaml`。安装时会获取官方 Electron 运行时；网络不通时可参考 [Electron 安装文档](https://www.electronjs.org/docs/latest/tutorial/installation) 的镜像配置，文件仍使用包内的官方摘要校验。
 
-`.github/workflows/build.yml` 提供 Windows 和 macOS 构建工作流，上传安装包供下载，不会自动发布 Release。该文件仅提供配置，尚未在远端执行。
+`.github/workflows/build.yml` 对 PR 执行 Windows 必要检查，对主分支和标签执行 Windows x64 / macOS arm64 完整源码及实际包验证。标签创建经审计的 draft Release，正式发布仍需手动进行。本轮尚未执行远端 CI。
 
 ## 项目结构
 
 ```text
 electron/storage.mjs       备份、完整恢复、校验、事务回滚、导入导出
-electron/presets.mjs       三个游戏的脚本字面量解析与预设
+electron/presets.mjs       显式旧脚本文本解析与测试 fixture 辅助
 electron/main.mjs          Electron 窗口、原生对话框、IPC 权限边界
 electron/i18n.mjs          主进程与存储层的多语言字典与翻译解析
 electron/preload.cjs       最小化、明确列举的 renderer API
+electron/retention.mjs     双队列保留与整批找回约束
+electron/restore-transaction.mjs 读档提交、回滚与启动恢复
+electron/classified-logger.mjs 20 MiB 分类日志
+shared/                   共享 IPC 契约、文案与可选模板
+src/pages/、src/hooks/     独立页面与数据操作 hook
 src/i18n/                 前端多语言配置（支持语言注册表、中英字典与类型安全键值）
 src/App.tsx               游戏库、存档时光轴、编辑表单、主题与语言选择
 src/format.ts             多语言日期、游戏名与文件大小格式化
@@ -212,7 +226,8 @@ scripts/deletion-interactions.mjs 回收站与恢复点的实际找回、删除�
 scripts/import-interactions.mjs 重复导入、取消、逐项处理与四主题界面验证
 scripts/portable-smoke.mjs 单文件便携版的实际启动与存读档检查
 scripts/audit-release.mjs  包内源码与发行文件摘要核对
-docs/screenshots/         测试示例的主题截图和验证记录
+scripts/e2e-harness.mjs   E2E 启动、程序身份、trace、报告与清理
+test-results/            分次测试报告、截图和 trace
 ```
 
 Electron 启用 context isolation、sandbox，关闭 Node integration，拒绝导航和额外窗口，并校验 IPC 主窗口与 frame 来源，遵循 [Electron 安全指南](https://www.electronjs.org/docs/latest/tutorial/security)。渲染层不能直接访问文件系统。主题与插画均随应用打包，无在线字体或图片依赖。
@@ -227,4 +242,4 @@ Electron 启用 context isolation、sandbox，关闭 Node integration，拒绝�
 
 同日的回收站工具栏与 Logo 更新已通过生产构建、严格 TypeScript 检查及三套 Electron 界面回归：基础界面 12 项、交互 16 项、删除专项 6 项，渲染错误为 0。已确认回收站的两种所选保护按钮均不显示，其他标签页的保护操作正常；新 Logo 在四主题中加载正常，Windows ICO 可由系统图像接口读取。PNG 尺寸、ICO 的 7 个尺寸图层及构建后的 SVG 与设计源文件一致性均已核对。预览与回收站截图分别为 `docs/screenshots/savehub-logo.png`、`trash-toolbar.png`。
 
-单文件便携版由 NSIS 启动器解包后再启动 Electron；`scripts/portable-smoke.mjs` 通过仅用于测试的本机调试端口连接实际窗口，验证当前版本与界面资源、启动、存档、读档、自动恢复点及退出。它不依赖启动器转发调试器标准输出。具体交付状态见 [1.1.4 验收记录](docs/验收记录-1.1.4.md)；[1.1.3 历史记录](docs/验收记录-1.1.3.md)、[1.1.2 历史记录](docs/验收记录-1.1.2.md)、[1.1.1 历史记录](docs/验收记录-1.1.1.md)、[1.1.0 历史记录](docs/验收记录-1.1.0.md)与 [1.0.0 历史记录](docs/验收记录.md)继续保留。
+单文件便携版由 NSIS 启动器解包后再启动 Electron；`scripts/portable-smoke.mjs` 通过仅用于测试的本机调试端口连接实际窗口，验证当前版本与界面资源、启动、存档、读档、自动恢复点及退出。它不依赖启动器转发调试器标准输出。当前交付证据见 [1.1.5 整改执行结果](docs/savehub_remediation_result.md)；[1.1.4 验收记录](docs/验收记录-1.1.4.md)；[1.1.3 历史记录](docs/验收记录-1.1.3.md)、[1.1.2 历史记录](docs/验收记录-1.1.2.md)、[1.1.1 历史记录](docs/验收记录-1.1.1.md)、[1.1.0 历史记录](docs/验收记录-1.1.0.md)与 [1.0.0 历史记录](docs/验收记录.md)继续保留。

@@ -1,59 +1,61 @@
-import { _electron as electron, expect } from '@playwright/test';
-import electronPath from 'electron';
+import { expect } from '@playwright/test';
+
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { SaveStore, atomicJson, within } from '../electron/storage.mjs';
+import { SaveStore, atomicJson } from '../electron/storage.mjs';
 import { makePresets } from '../electron/presets.mjs';
+import { runE2E } from './e2e-harness.mjs';
 
-const root = path.resolve('.test-data');
-await fs.mkdir(root, { recursive: true });
-const base = await fs.mkdtemp(path.join(root, 'ui-'));
-const dataDir = path.join(base, 'data');
-const screenshots = path.resolve('docs', 'screenshots');
-await fs.mkdir(screenshots, { recursive: true });
-const presets = await makePresets();
-for (const game of presets) {
-  const source = path.join(base, 'sources', game.id);
-  await fs.mkdir(path.join(source, 'saves'), { recursive: true });
-  await fs.writeFile(path.join(source, 'saves', 'progress.dat'), Buffer.alloc(4 * 1024 * 1024, 65));
-  game.locations = { win32: { root: source, items: ['saves'] }, darwin: { root: source, items: ['saves'] } };
-  game.legacyRoot = '';
-}
-const store = await new SaveStore(dataDir).init(presets);
-const sampleNames = ['风暴之外 · 新的旅程', '抵达王城 · 初见黄金树', '挑战之前 · 留住这一刻'];
-let sample;
-for (const [index, label] of sampleNames.entries()) {
-  sample = await store.createSnapshot('elden-ring', { label, note: ['一周目 · 宁姆格福，故事从这里开始', '一周目 · 王城罗德尔，向黄金树进发', '一周目 · 黄金树大教堂，准备迎接新的挑战'][index] });
-  const meta = await store.readSnapshot('elden-ring', sample.id);
-  meta.createdAt = new Date(Date.now() - (3 - index) * 86400000).toISOString();
-  if (index === 2) meta.favorite = true;
-  await atomicJson(path.join(store.snapshotDir('elden-ring', sample.id), 'manifest.json'), meta);
-}
-await store.restoreSnapshot('elden-ring', sample.id);
-await store.createSnapshot('slay-the-spire', { label: '第三幕 · 向心脏进发', note: '铁甲战士，准备最后一战。' });
-await store.createSnapshot('dark-souls-2', { label: '如蜜 · 篝火旁', note: '旅程的起点。' });
+await runE2E('smoke', async (harness) => {
+  const { base, screenshots, errors, checks } = harness;
+  const dataDir = path.join(base, 'data');
+  const presets = await makePresets();
+  for (const game of presets) {
+    const source = path.join(base, 'sources', game.id);
+    await fs.mkdir(path.join(source, 'saves'), { recursive: true });
+    await fs.writeFile(path.join(source, 'saves', 'progress.dat'), Buffer.alloc(4 * 1024 * 1024, 65));
+    game.locations = { win32: { root: source, items: ['saves'] }, darwin: { root: source, items: ['saves'] } };
+    game.legacyRoot = '';
+  }
+  const store = await new SaveStore(dataDir).init(presets);
+  const sampleNames = ['风暴之外 · 新的旅程', '抵达王城 · 初见黄金树', '挑战之前 · 留住这一刻'];
+  let sample;
+  for (const [index, label] of sampleNames.entries()) {
+    sample = await store.createSnapshot('elden-ring', {
+      label,
+      note: [
+        '一周目 · 宁姆格福，故事从这里开始',
+        '一周目 · 王城罗德尔，向黄金树进发',
+        '一周目 · 黄金树大教堂，准备迎接新的挑战',
+      ][index],
+    });
+    const meta = await store.readSnapshot('elden-ring', sample.id);
+    meta.createdAt = new Date(Date.now() - (3 - index) * 86400000).toISOString();
+    if (index === 2) meta.favorite = true;
+    await atomicJson(path.join(store.snapshotDir('elden-ring', sample.id), 'manifest.json'), meta);
+  }
+  await store.restoreSnapshot('elden-ring', sample.id);
+  await store.createSnapshot('slay-the-spire', { label: '第三幕 · 向心脏进发', note: '铁甲战士，准备最后一战。' });
+  await store.createSnapshot('dark-souls-2', { label: '如蜜 · 篝火旁', note: '旅程的起点。' });
 
-const env = { ...process.env, SAVEHUB_DATA_DIR: dataDir };
-delete env.ELECTRON_RUN_AS_NODE;
-delete env.SAVEHUB_DEV_URL;
-let application;
-const errors = [];
-const checks = [];
-try {
-  application = await electron.launch({ executablePath: process.env.SAVEHUB_TEST_EXECUTABLE || electronPath, args: process.env.SAVEHUB_TEST_EXECUTABLE ? [] : ['.'], env, timeout: 45000 });
+  let application;
+
+  application = await harness.launch(dataDir);
   const page = await application.firstWindow();
   await page.getByRole('button', { name: /^存档库/ }).click();
-  page.on('pageerror', error => errors.push(error.message));
   await page.waitForSelector('.snapshot-row');
   await expect(page.getByRole('heading', { name: '艾尔登法环', exact: true })).toBeVisible();
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
   assert.equal(await page.evaluate(() => typeof window.process), 'undefined');
   checks.push('Electron renderer loads with context isolation and no Node globals');
-  const appIcon = await application.evaluate(({ nativeImage }, filename) => {
-    const icon = nativeImage.createFromPath(filename);
-    return { empty: icon.isEmpty(), ...icon.getSize() };
-  }, path.resolve('build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'));
+  const appIcon = await application.evaluate(
+    ({ nativeImage }, filename) => {
+      const icon = nativeImage.createFromPath(filename);
+      return { empty: icon.isEmpty(), ...icon.getSize() };
+    },
+    path.resolve('build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+  );
   assert(!appIcon.empty && appIcon.width >= 16 && appIcon.height >= 16);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', /.+/);
   checks.push('Application icon decodes natively and the shared SaveHub logo is configured as the favicon');
@@ -67,7 +69,7 @@ try {
     await page.getByRole('button', { name: '切换主题', exact: true }).click();
     const brand = page.locator('.brand .savehub-logo');
     await expect(brand).toBeVisible();
-    await expect.poll(() => brand.evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+    await expect.poll(() => brand.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
     await page.mouse.move(800, 30);
     await page.screenshot({ path: path.join(screenshots, `${theme}.png`), animations: 'disabled' });
     checks.push(`${theme} theme renders and persists`);
@@ -101,9 +103,17 @@ try {
   await dialog.getByRole('button', { name: '确认读档', exact: true }).click();
   await expect(dialog).toHaveCount(0, { timeout: 30000 });
   assert.equal((await fs.stat(liveSave)).size, 4 * 1024 * 1024);
-  const safety = (await store.snapshots('elden-ring')).find(snapshot => snapshot.kind === 'safety' && snapshot.label.includes('UI 测试'));
+  const safety = (await store.snapshots('elden-ring')).find(
+    (snapshot) => snapshot.kind === 'safety' && snapshot.label.includes('UI 测试'),
+  );
   assert(safety);
-  assert.equal(await fs.readFile(path.join(store.snapshotDir('elden-ring', safety.id), 'payload', 'saves', 'progress.dat'), 'utf8'), 'live-before-restore');
+  assert.equal(
+    await fs.readFile(
+      path.join(store.snapshotDir('elden-ring', safety.id), 'payload', 'saves', 'progress.dat'),
+      'utf8',
+    ),
+    'live-before-restore',
+  );
   checks.push('Restore confirmation, actual bytes replaced, and safety snapshot verified');
 
   await page.getByRole('button', { name: 'UI 测试 · 创建并恢复 更多操作', exact: true }).click();
@@ -124,12 +134,18 @@ try {
   await dialog.getByRole('textbox', { name: /游戏名称/ }).fill('自动化测试游戏');
   await dialog.getByRole('textbox', { name: '副标题', exact: true }).fill('TEST WORLD');
   await dialog.getByRole('button', { name: '宝石图标', exact: true }).click();
-  await application.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, path.resolve('build/icon.png'));
+  await application.evaluate(({ dialog }, file) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+  }, path.resolve('build/icon.png'));
   await dialog.getByRole('button', { name: '上传', exact: true }).click();
   await expect(dialog.locator('.edit-game-icon img')).toBeVisible();
-  await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, presets[0].locations[process.platform].root);
+  await application.evaluate(({ dialog }, folder) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
+  }, presets[0].locations[process.platform].root);
   await dialog.getByTitle('浏览文件夹', { exact: true }).click();
-  await expect(dialog.getByRole('textbox', { name: '游戏存档根目录', exact: true })).toHaveValue(presets[0].locations[process.platform].root);
+  await expect(dialog.getByRole('textbox', { name: '游戏存档根目录', exact: true })).toHaveValue(
+    presets[0].locations[process.platform].root,
+  );
   await dialog.getByRole('textbox', { name: /要备份的文件或目录/ }).fill('saves');
   const macOSTab = dialog.getByRole('tab', { name: /macOS/ });
   await macOSTab.click();
@@ -147,8 +163,14 @@ try {
   await dialog.getByRole('button', { name: '删除游戏', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await page.getByRole('button', { name: '设置与关于', exact: true }).click();
-  await page.getByRole('button', { name: '找回项目', exact: true }).click();
+  await page.getByRole('button', { name: '管理已移除的游戏', exact: true }).click();
+  await page
+    .locator('.catalog-game')
+    .filter({ hasText: '自动化测试游戏' })
+    .getByRole('button', { name: /找回游戏/ })
+    .click();
   await expect(page.getByRole('button', { name: /自动化测试游戏 0 份存档/ })).toBeVisible();
+  await page.getByRole('button', { name: '设置与关于', exact: true }).click();
   checks.push('Native directory picker, custom image import, dual-platform configuration, game removal and recovery');
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1080, 760));
   await page.getByRole('button', { name: 'English', exact: true }).click();
@@ -156,7 +178,15 @@ try {
   await expect(page.getByRole('button', { name: /^Save Library/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Switch language', exact: true })).toHaveText('EN');
   await page.getByRole('button', { name: /^Save Library/ }).click();
-  assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && Array.from(document.querySelectorAll('.button, .filter-tabs button, .sort-heading, .load-button')).every(el => el.scrollWidth <= el.clientWidth + 1)));
+  assert(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <= window.innerWidth &&
+        Array.from(document.querySelectorAll('.button, .filter-tabs button, .sort-heading, .load-button')).every(
+          (el) => el.scrollWidth <= el.clientWidth + 1,
+        ),
+    ),
+  );
   await page.getByRole('button', { name: 'Switch language', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.getByRole('button', { name: /^存档库/ })).toBeVisible();
@@ -168,18 +198,20 @@ try {
   await page.screenshot({ path: path.join(screenshots, 'compact.png') });
   checks.push('1080 x 760 window has no horizontal overflow');
 
-  await application.close(); application = undefined;
+  await harness.close(application);
   const reopened = await new SaveStore(dataDir).init();
   const persisted = await reopened.state();
   assert.equal(persisted.theme, 'ink');
   assert.equal(persisted.language, 'zh');
-  const custom = persisted.games.find(game => game.name === '自动化测试游戏');
-  assert(custom && !custom.deletedAt && custom.icon.startsWith('data:image/png;base64,'));
+  const custom = persisted.games.find((game) => game.name === '自动化测试游戏');
+  assert(custom && !custom.deletedAt && custom.icon.startsWith('savehub-icon://'));
   assert.equal(custom.locations.darwin.root, '/Users/example/Library/Application Support/Test');
   assert.deepEqual(errors, []);
-  await atomicJson(path.join(screenshots, 'verification.json'), { date: new Date().toISOString(), fixture: 'Isolated synthetic game files; no real game data modified.', checks, rendererErrors: errors });
+  await atomicJson(path.join(screenshots, 'verification.json'), {
+    date: new Date().toISOString(),
+    fixture: 'Isolated synthetic game files; no real game data modified.',
+    checks,
+    rendererErrors: errors,
+  });
   console.log(JSON.stringify({ success: true, checks, screenshots }, null, 2));
-} finally {
-  if (application) await application.close().catch(() => {});
-  if (!process.env.SAVEHUB_KEEP_TEST_DATA) { assert(within(root, base) && base !== root); await fs.rm(base, { recursive: true, force: true }); }
-}
+});

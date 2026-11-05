@@ -6,14 +6,14 @@ Cherish every adventure. A local game save manager built with **Electron + React
 
 ## Getting Started
 
-Windows: Open `release/1.1.4/win-unpacked/SaveHub.exe`, or use the installer / portable executable under `release/1.1.4/`. Keep the entire `win-unpacked` folder intact—do not copy only the EXE file inside it. Close any running older version before launching the new version; existing data libraries work out of the box.
+Windows: Open `release/1.1.5/win-unpacked/SaveHub.exe`, or use the installer / portable executable under `release/1.1.5/`. Keep the entire `win-unpacked` folder intact—do not copy only the EXE file inside it. Close any running older version before launching the new version; existing data libraries work out of the box.
 
-1. Select a game and open **Game Settings**. Confirm the **Game Save Root Directory** for your current OS and the **Relative Paths to Back Up**.
+1. On first launch the library is empty. Add a game using an optional template or a blank project, then open **Game Settings**. Confirm the **Game Save Root Directory** for your current OS and the **Relative Paths to Back Up**.
 2. Close the game, click **New Save**, and enter a name and optional notes.
 3. Click **Restore** on a save and confirm that both the game and any cloud sync services that write to save files are closed. SaveHub first automatically backs up and verifies your current progress before restoring the selected save; if the automatic backup fails, the restore stops immediately.
 4. To undo a restore, find `Before Restore · …` (`读档前 · …`) under **Restore Points** on the right side of the timeline and click **Restore**.
 
-Preset games can be edited or removed, and you can add any custom game. Icons support built-in emblems as well as local PNG / JPG / WebP / ICO images. Imported images are copied into the configuration directory so they do not depend on the original file remaining in place.
+Games added from templates can be edited or removed, and you can add any custom game. Icons support built-in emblems as well as local PNG / JPG / WebP / ICO images. Imported images are copied into the configuration directory so they do not depend on the original file remaining in place.
 
 ## All Games
 
@@ -24,19 +24,11 @@ Preset games can be edited or removed, and you can add any custom game. Icons su
 - Import an entire game export bundle or an individual game folder. Duplicate identity or name matches offer per-item and bulk overwrite, skip and keep-both choices. Overwrite replaces settings while retaining existing saves; skipping a game also skips its bundled saves.
 - Bundled saves have a separate conflict review using the existing overwrite restrictions and replacement rollback. No game settings or saves are written until final confirmation. Canceling either step leaves the library unchanged. Check local paths after importing.
 
-See [game management format and verification](docs/游戏管理.md) for details. These changes are in source and `dist/`; existing `release/1.1.4/` installers require rebuilding to include them.
+See [game management format and verification](docs/游戏管理.md) for details. For the current 1.1.5 implementation and verified package boundaries, see [remediation results](docs/savehub_remediation_result.md).
 
-## Reference Scripts & Mapping
+## Optional Templates and Legacy Imports
 
-SaveHub was designed with compatibility for legacy `save.sh` / `load.sh` backup scripts from these three games:
-
-| Game | Original Script Root Directory (`target`) | Backup Items (`array`) |
-| --- | --- | --- |
-| Slay the Spire | `D:\Steam\steamapps\common\SlayTheSpire` | `betaPreferences`, `preferences`, `saves` |
-| Elden Ring | `%USERPROFILE%\AppData\Roaming\EldenRing` | `Steam Account ID` (`Steam ID`) |
-| Dark Souls II | `%USERPROFILE%\AppData\Roaming\DarkSoulsII` | `Steam Account ID` (`Steam ID`) |
-
-On first launch on Windows, SaveHub attempts to read `save.sh` from matching folders on the user's Desktop, parsing only literal values for `source` / `target` / `array`—**it never executes the script**. When no script is found, the root directory presets above are used; Elden Ring and Dark Souls II do not prefill an account folder, so you should enter your own `Steam Account ID` (`Steam ID`) directory in **Game Settings**. All paths and account directories can be manually edited.
+New libraries start empty. Optional templates provide Elden Ring, Slay the Spire and Dark Souls II names, icons and common save entries. Select the actual local save folder and account subdirectory yourself. SaveHub does not read Desktop shell scripts or inject an author-specific Steam path.
 
 The `source` variable in legacy scripts corresponds to the legacy backup folder. New saves created by SaveHub use an isolated vault and UUIDs rather than numbering folders by count, and will never overwrite legacy `ArchiveFile…` directories.
 
@@ -133,7 +125,7 @@ SaveHub/
 
 Backups are stored as plain files and directories rather than compressed archives, so you can inspect them directly at any time. Restoring a save replaces only the configured relative paths while leaving all other files in the game directory untouched; any newly created files inside the replaced target paths are removed to guarantee exact point-in-time restoration semantics. Restore Points also record configured paths that did not exist before the restore, ensuring those paths are removed again if you roll back using that Restore Point.
 
-When creating a backup, files are first copied to a staging directory and verified against the source files, copied files, and SHA-256 manifest before being committed. When restoring, SaveHub first verifies the backup integrity, creates an automatic Restore Point of your current live files, stages the restore on the target disk, and swaps each item via atomic renames. If a restore fails, original files are rolled back automatically; if the process is unexpectedly terminated, unfinished transactions are recovered on the next startup using the transaction journal. Failed staging directories and journals are retained for diagnostics and may occupy disk space. Normal deletion only updates record metadata without freeing disk space; disk space is freed only when you execute **Delete Permanently** in the Recycle Bin or Removed Restore Points. SaveHub never auto-deletes Restore Points.
+When creating a backup, files are first copied to a staging directory and verified against the source files, copied files, and SHA-256 manifest before being committed. When restoring, SaveHub first verifies the backup integrity, creates an automatic Restore Point of your current live files, stages the restore on the target disk, and swaps each item via atomic renames. If a restore fails, original files are rolled back automatically; if the process is unexpectedly terminated, unfinished transactions are recovered on the next startup using the transaction journal. Failed staging directories and journals are retained for diagnostics and may occupy disk space. Normal deletion only updates record metadata without freeing disk space; disk space is freed only when you execute **Delete Permanently** in the Recycle Bin or Removed Restore Points. Restore Points follow the automatic retention rules below.
 
 Before permanent deletion, SaveHub preflight-checks the entire batch for record identity, deletion state, protection flags, and path safety. Each record persists a `purging` state before file removal begins; if a file is locked by another process or the app is interrupted, reopening SaveHub marks the record as **Incomplete Purge**, allowing you to run permanent deletion again to finish cleanup. Records that have started purging may be incomplete and cannot be recovered, edited, protected, or exported; batch operations report succeeded and failed items separately.
 
@@ -147,25 +139,42 @@ SaveHub uses a unified Electron and Node.js filesystem implementation with zero 
 
 Minimum OS requirements follow the current Electron runtime: Windows 10 or later, and macOS 13 Ventura or later. macOS release targets are configured for **arm64** (Apple Silicon) only; Intel Mac builds are not produced. Windows builds currently target x64.
 
-On 2026-11-03, source tests, all four GUI test suites, and `pnpm dist:mac` packaging were verified on an Apple Silicon Mac (macOS 26.6), and the packaged `.app` passed the baseline GUI test suite. The macOS bundle uses ad-hoc signing (`build.mac.identity: "-"`), which prevents macOS from reporting the downloaded bundle as "damaged"; when opening on another Mac for the first time, allow it in **System Settings → Privacy & Security**. Before distributing to external users, configure Apple Developer ID signing and notarization (and remove `identity: "-"`); this repository does not include signing certificates or notarization credentials. Windows builds are also unsigned by default.
+Historical verification (not evidence for this 1.1.5 build): on 2026-11-03, source tests, all four GUI test suites, and `pnpm dist:mac` packaging were verified on an Apple Silicon Mac (macOS 26.6), and the packaged `.app` passed the baseline GUI test suite. The macOS bundle uses ad-hoc signing (`build.mac.identity: "-"`), which prevents macOS from reporting the downloaded bundle as "damaged"; when opening on another Mac for the first time, allow it in **System Settings → Privacy & Security**. Before distributing to external users, configure Apple Developer ID signing and notarization (and remove `identity: "-"`); this repository does not include signing certificates or notarization credentials. Windows builds are also unsigned by default.
+
+
+## Restore Point Retention and Logs
+
+- Defaults are **5 active Restore Points / 15 Removed Restore Points** per game. Settings applies both global limits; Game Settings can override each limit independently or inherit the global value. Values must be nonnegative safe integers. **0 retains no records**.
+- Both queues evict the oldest record **modification time (updatedAt)**. Active overflow moves to Removed Restore Points; removed overflow is physically deleted without additional prompts. Favorites and protection marks do not exempt restore points from these limits. Ordinary saves are unaffected.
+- For active limit N, recovering K records requires **N > 0 and 1 ≤ K ≤ N**. Oversized batches are rejected in full. With N=0, both single and batch recovery are disabled. A valid recovery refreshes modification time, preserves creation time, then applies both queue limits even if the active queue was already full.
+- Transaction safety copies survive until commit or successful rollback, including 0/0 settings. Legacy libraries adopt 5/15; a missing updatedAt uses the valid creation time. Old maxRestorePoints=0 does not mean unlimited retention anymore. Review limits before upgrading an existing library.
+- Runtime logs share **one 20 MiB (20,971,520-byte) budget**, split by level and operation. Complete oldest records are trimmed globally; legacy rotations are migrated. Transaction journals are excluded. Open the directory from Settings.
 
 ## Development & Build
 
 For complete maintainer instructions, see the [Development, Build, Run & Release Guide](docs/开发与发布指南.en.md) ([中文版](docs/开发与发布指南.md)), which covers environment setup, all project commands, production preview, packaged binary verification, SHA-256 release auditing, Windows / macOS packaging, CI workflows, remote releases, and crash/interruption recovery.
 
-As of 2026-11-02, the source tree includes current-tab batch export, protection scope adjustments, per-item duplicate import resolution, hidden protection buttons in the Recycle Bin, and the unified SaveHub Logo, which have not yet been repackaged into the historical `1.1.4` installer artifacts. The guide distinguishes between current source verification and historical release package verification; the next release should be packaged and audited under a new version directory.
+See [1.1.5 remediation results](docs/savehub_remediation_result.md) for current source and actual Windows package evidence. Historical 1.1.4 artifacts remain unchanged. This round still requires native macOS Apple Silicon verification.
 
 The SaveHub Logo features an S-shaped save trajectory with checkpoint nodes in deep teal, light cream, and crimson. The app sidebar, splash screen, Settings & About page, browser tab, and desktop icon all share the same unified design; the source SVG, 1024px PNG, and multi-resolution Windows ICO reside in `build/`. See [Logo Asset Guide](build/README.md) for regeneration details.
 
 Git tracks source code, test scripts, build configurations, the pnpm lockfile, icon assets in `build/`, and hand-written documentation. Dependencies, build outputs, local save vaults, test data, auto-generated screenshots and verification JSON reports, logs, and machine-local environment files are excluded via `.gitignore` (ignoring rules never delete existing local files).
 
-`docs/screenshots/` and release audit JSON files are local or CI verification artifacts that can be regenerated using the test and audit commands below. `.env.example` and shared VS Code configurations may be committed.
+Current reports, screenshots and traces are written under `test-results/`; `docs/screenshots/` preserves historical evidence. Release audit JSON files are generated locally or in CI. `.env.example` and shared VS Code configurations may be committed.
 
 Environment: Node.js 22.12+ (Node.js 24 recommended), pnpm 11.25.0.
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm dev                 # Vite + Electron using .local-data
+pnpm lint
+pnpm format:check
+pnpm check:contracts
+pnpm test:e2e           # Playwright runner, per-run reports and traces
+node scripts/test-package.mjs # Runs the actual packaged application
+node scripts/benchmark.mjs    # Summary-cache and real-payload measurements
+node scripts/benchmark-ui.mjs # UI measurements with 100 / 1,000 / 10,000 summaries
+pnpm checksums
 pnpm test                # Real filesystem storage tests on temporary directories
 pnpm build               # TypeScript typecheck + Vite frontend production build
 pnpm build:icons         # Regenerate PNG and Windows ICO after editing Logo SVG
@@ -178,21 +187,26 @@ pnpm dist:win            # Windows NSIS installer + single-file portable executa
 pnpm pack:mac            # macOS arm64 unpacked bundle (.app)
 pnpm dist:mac            # Build arm64 DMG + ZIP on macOS
 pnpm test:portable       # Unpack, launch & save/restore verification for Windows portable EXE
-pnpm audit:release       # Verify packaged Windows ASAR contents & release SHA-256 digests
+pnpm audit:release       # Verify the current platform ASAR and release digests
 ```
 
 After building, `pnpm start` opens the production UI inside Electron. All dependency versions are pinned with `pnpm-lock.yaml`. Installing dependencies downloads the official Electron runtime; if network access is restricted, refer to the mirror configuration in the [Electron Installation Guide](https://www.electronjs.org/docs/latest/tutorial/installation) (downloaded archives are still verified against the official checksums bundled in the package).
 
-`.github/workflows/build.yml` provides a GitHub Actions workflow for Windows and macOS builds that uploads build artifacts for download without automatically publishing a GitHub Release.
+`.github/workflows/build.yml` runs focused Windows checks for PRs, and full Windows x64 / macOS arm64 source and package verification for main branches and tags. Tags create an audited draft Release; publication remains manual. Remote CI has not been executed in this verification round.
 
 ## Project Structure
 
 ```text
 electron/storage.mjs       Backup, full restore, SHA-256 verification, transaction rollback, import/export
-electron/presets.mjs       Literal parser for legacy scripts & default game presets
+electron/presets.mjs       Explicit legacy literal parser & test fixture helpers
 electron/main.mjs          Electron window lifecycle, native dialogs & IPC security boundaries
 electron/i18n.mjs          Main-process & storage-layer i18n dictionaries and key resolver
 electron/preload.cjs       Minimal, explicitly enumerated renderer bridge API
+electron/retention.mjs     Two-queue retention and batch recovery validation
+electron/restore-transaction.mjs Restore commit, rollback and startup recovery
+electron/classified-logger.mjs 20 MiB classified runtime logs
+shared/                   Shared IPC contracts, locales and optional templates
+src/pages/, src/hooks/    Extracted pages and application data hook
 src/i18n/                  Frontend i18n module (language registry, ZH/EN locale dictionaries & typed keys)
 src/App.tsx                Game library, save timeline, edit forms, theme & language switching
 src/format.ts              Localized date, preset game name & byte size formatting
@@ -212,7 +226,8 @@ scripts/deletion-interactions.mjs Real recovery, permanent deletion & retry for 
 scripts/import-interactions.mjs Duplicate import resolution, cancellation & 4-theme UI verification
 scripts/portable-smoke.mjs Real launch & save/restore verification for the single-file portable EXE
 scripts/audit-release.mjs  Packaged ASAR source comparison & SHA-256 release digest audit
-docs/screenshots/          Test theme screenshots & JSON verification reports
+scripts/e2e-harness.mjs   E2E launch, target identity, trace, report and cleanup
+test-results/             Per-run reports, screenshots and trace archives
 ```
 
 Electron runs with `contextIsolation: true`, `sandbox: true`, and `nodeIntegration: false`, blocks arbitrary navigation and pop-up windows, and validates the sender window and frame on every IPC call in accordance with the [Electron Security Guidelines](https://www.electronjs.org/docs/latest/tutorial/security). The renderer process has no direct filesystem access. All themes and SVG illustrations are bundled locally with zero external font or image network requests.
@@ -227,5 +242,5 @@ Verification of the duplicate import workflow on 2026-11-02: all 73 storage test
 
 On the same day, the Recycle Bin toolbar and Logo updates passed production build, strict TypeScript checks, and three Electron GUI regression suites: baseline UI (12 checks), interactions (16 checks), and deletion suite (6 checks) with 0 renderer errors. Confirmed that both protection buttons are hidden in the Recycle Bin while working normally in other tabs, the new Logo renders cleanly across all four themes, and the multi-resolution Windows ICO loads properly via native OS image APIs.
 
-The single-file Windows portable executable is unpacked by an NSIS launcher before starting Electron; `scripts/portable-smoke.mjs` connects to the actual window via a test-only localhost debugging port to verify the version, UI assets, startup, backup, restore, automatic Restore Point creation, and clean exit without relying on stdout forwarding from the launcher. For detailed delivery records, see [1.1.4 Acceptance Record](docs/验收记录-1.1.4.md); historical records for [1.1.3](docs/验收记录-1.1.3.md), [1.1.2](docs/验收记录-1.1.2.md), [1.1.1](docs/验收记录-1.1.1.md), [1.1.0](docs/验收记录-1.1.0.md), and [1.0.0](docs/验收记录.md) are preserved.
+The single-file Windows portable executable is unpacked by an NSIS launcher before starting Electron; `scripts/portable-smoke.mjs` connects to the actual window via a test-only localhost debugging port to verify the version, UI assets, startup, backup, restore, automatic Restore Point creation, and clean exit without relying on stdout forwarding from the launcher. For current delivery evidence, see [1.1.5 remediation results](docs/savehub_remediation_result.md); [1.1.4 Acceptance Record](docs/验收记录-1.1.4.md); historical records for [1.1.3](docs/验收记录-1.1.3.md), [1.1.2](docs/验收记录-1.1.2.md), [1.1.1](docs/验收记录-1.1.1.md), [1.1.0](docs/验收记录-1.1.0.md), and [1.0.0](docs/验收记录.md) are preserved.
 

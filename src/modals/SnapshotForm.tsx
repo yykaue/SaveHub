@@ -16,14 +16,13 @@ export function SnapshotForm({
   onCancel: () => void;
 }) {
   const [label, setLabel] = useState(
-    snapshot?.label ||
-      `${t('modals.snapshotForm.defaultLabelPrefix')} · ${dateLabel(new Date().toISOString())}`,
+    snapshot?.label || `${t('modals.snapshotForm.defaultLabelPrefix')} · ${dateLabel(new Date().toISOString())}`,
   );
   const [note, setNote] = useState(snapshot?.note || '');
 
   return (
     <form
-      onSubmit={event => {
+      onSubmit={(event) => {
         event.preventDefault();
         void onSave({ label, note });
       }}
@@ -38,20 +37,19 @@ export function SnapshotForm({
             required
             maxLength={100}
             value={label}
-            onChange={event => setLabel(event.target.value)}
+            onChange={(event) => setLabel(event.target.value)}
             placeholder={t('modals.snapshotForm.namePlaceholder')}
           />
         </label>
         <label className="field">
           <span className="field-label">
-            {t('modals.snapshotForm.noteLabel')}{' '}
-            <span className="optional">{t('modals.snapshotForm.optional')}</span>
+            {t('modals.snapshotForm.noteLabel')} <span className="optional">{t('modals.snapshotForm.optional')}</span>
           </span>
           <textarea
             rows={4}
             maxLength={2000}
             value={note}
-            onChange={event => setNote(event.target.value)}
+            onChange={(event) => setNote(event.target.value)}
             placeholder={t('modals.snapshotForm.notePlaceholder')}
           />
         </label>
@@ -74,4 +72,3 @@ export function SnapshotForm({
     </form>
   );
 }
-

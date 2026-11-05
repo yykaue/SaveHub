@@ -1,0 +1,189 @@
+export type Theme = 'ink' | 'tech' | 'cyber' | 'glass';
+export type Language = 'zh' | 'en';
+export type Platform = 'win32' | 'darwin';
+export interface RestorePointRetention {
+  active: number;
+  removed: number;
+}
+export interface Location {
+  root: string;
+  items: string[];
+}
+export interface Snapshot {
+  id: string;
+  gameId: string;
+  label: string;
+  note: string;
+  kind: 'manual' | 'safety' | 'imported';
+  createdAt: string;
+  updatedAt: string;
+  platform: Platform;
+  entries: string[];
+  absent: string[];
+  fileCount: number;
+  bytes: number;
+  favorite?: boolean;
+  protected?: boolean;
+  deletedAt?: string;
+  corrupted?: boolean;
+  error?: string;
+  purgePending?: boolean;
+}
+export interface GameInput {
+  id?: string;
+  name: string;
+  subtitle: string;
+  icon: string;
+  color: string;
+  locations: Record<Platform, Location>;
+  legacyRoot: string;
+  restorePointRetention?: Partial<RestorePointRetention>;
+}
+export interface Game extends GameInput {
+  id: string;
+  createdAt: string;
+  deletedAt?: string;
+  purgeGamePending?: boolean;
+  purgeSnapshotsPending?: boolean;
+  snapshots: Snapshot[];
+  restorePoints: Snapshot[];
+  pathStatus: 'ready' | 'unconfigured' | 'missing';
+  legacyCount: number;
+  restorePointRetentionEffective: RestorePointRetention;
+  recoveryBlocked?: boolean;
+}
+export interface AppState {
+  games: Game[];
+  theme: Theme;
+  language: Language;
+  platform: Platform;
+  dataDir: string;
+  recoveryMessages: string[];
+  version: string;
+  restorePointRetention: RestorePointRetention;
+}
+export interface Progress {
+  phase: string;
+  detail: string;
+  completed: number;
+  total?: number;
+}
+export type ImportAction = 'overwrite' | 'skip' | 'keep-both';
+export interface ImportDecision {
+  itemId: string;
+  action: ImportAction;
+  targetId?: string;
+}
+export interface ImportItem {
+  id: string;
+  name: string;
+  source: string;
+  bytes: number;
+  fileCount: number;
+  matches: Snapshot[];
+}
+export interface ImportPlan {
+  id: string;
+  gameId: string;
+  directory: string;
+  items: ImportItem[];
+  failed: { name: string; error: string }[];
+}
+export interface ImportReport {
+  imported: string[];
+  overwritten: string[];
+  keptBoth: string[];
+  skipped: string[];
+  failed: { name: string; error: string }[];
+}
+export interface BatchReport {
+  updated: string[];
+  failed: { id: string; label: string; error: string }[];
+}
+export interface ExportResult {
+  folder: string;
+  count: number;
+}
+export interface GameImportItem {
+  id: string;
+  game: GameInput & { id: string; createdAt: string };
+  source: string;
+  includesSnapshots: boolean;
+  matches: (GameInput & {
+    id: string;
+    createdAt: string;
+    deletedAt?: string;
+    purgeGamePending?: boolean;
+    purgeSnapshotsPending?: boolean;
+  })[];
+}
+export interface GameImportPlan {
+  id: string;
+  directory: string;
+  items: GameImportItem[];
+  failed: { name: string; error: string }[];
+}
+export interface GameImportReview {
+  id: string;
+  planId: string;
+  failed: { name: string; error: string }[];
+  games: { itemId: string; name: string; action: ImportAction | 'import'; snapshots: ImportPlan | null }[];
+}
+export interface GameSnapshotDecision {
+  itemId: string;
+  decisions: ImportDecision[];
+}
+export interface GameImportReport {
+  games: ImportReport;
+  snapshots: { gameName: string; report: ImportReport }[];
+}
+export interface Bridge {
+  state(): Promise<AppState>;
+  setTheme(theme: Theme): Promise<void>;
+  setLanguage(language: Language): Promise<void>;
+  setRestorePointRetention(value: RestorePointRetention): Promise<void>;
+  saveGame(game: GameInput): Promise<string>;
+  removeGame(id: string, undo?: boolean, deleteRecords?: boolean): Promise<void>;
+  exportGames(ids: string[], includeSnapshots?: boolean): Promise<(ExportResult & { snapshotCount: number }) | null>;
+  importGames(): Promise<GameImportPlan | null>;
+  reviewGameImport(planId: string, decisions: ImportDecision[]): Promise<GameImportReview>;
+  executeGameImport(reviewId: string, decisions: GameSnapshotDecision[]): Promise<GameImportReport>;
+  cancelGameImport(planId: string): Promise<void>;
+  pickDirectory(): Promise<string | null>;
+  pickIcon(): Promise<string | null>;
+  saveSnapshot(id: string, details: { label: string; note: string }): Promise<Snapshot>;
+  restoreSnapshot(gameId: string, id: string): Promise<{ safetyId: string; label: string }>;
+  updateSnapshot(
+    gameId: string,
+    id: string,
+    details: { label?: string; note?: string; favorite?: boolean; protected?: boolean; deleted?: boolean },
+  ): Promise<void>;
+  updateSnapshots(
+    gameId: string,
+    ids: string[] | 'all',
+    details: { deleted: boolean } | { protected: boolean },
+  ): Promise<BatchReport>;
+  deleteSnapshots(gameId: string, ids: string[]): Promise<BatchReport>;
+  verifySnapshot(gameId: string, id: string): Promise<{ fileCount: number; bytes: number }>;
+  importSnapshots(id: string, useLegacy?: boolean): Promise<ImportPlan | null>;
+  executeImport(planId: string, decisions: ImportDecision[]): Promise<ImportReport>;
+  cancelImport(planId: string): Promise<void>;
+  exportSnapshot(gameId: string, id: string): Promise<string | null>;
+  exportSnapshots(gameId: string, ids: string[] | 'all'): Promise<ExportResult | null>;
+  openFolder(kind: 'vault' | 'logs' | 'game' | 'snapshots', id?: string): Promise<void>;
+  onProgress(callback: (progress: Progress | null) => void): () => void;
+}
+declare global {
+  interface Window {
+    savehub?: Bridge;
+  }
+}
+
+export type CommandName = Exclude<keyof Bridge, 'onProgress'>;
+export type Commands = Pick<Bridge, CommandName>;
+export interface ErrorPayload {
+  code: string;
+  params: Record<string, string | number>;
+  message: string;
+}
+export type Result<T> = { ok: true; data: T } | { ok: false; error: ErrorPayload };

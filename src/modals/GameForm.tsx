@@ -4,6 +4,8 @@ import { GameGlyph } from '../art';
 import { getDictionary, t } from '../i18n';
 import { animate } from '../motion';
 import type { Bridge, Game, GameInput, Platform } from '../types';
+import { RetentionFields, retentionDraft, retentionValues } from '../components/RetentionSettings';
+import templates from '../../shared/game-templates.json';
 
 const icons = ['ring', 'spire', 'flame', 'gamepad', 'swords', 'gem', 'ghost', 'rocket'] as const;
 const colors = ['#8a9270', '#729486', '#a28167', '#738fb1', '#ab80ae', '#be7976'];
@@ -16,6 +18,7 @@ export function GameForm({
   onSave,
   onCancel,
   onDelete,
+  retentionDefaults,
 }: {
   game?: Game;
   platform: Platform;
@@ -24,6 +27,7 @@ export function GameForm({
   onSave: (values: GameInput) => Promise<void>;
   onCancel: () => void;
   onDelete?: () => void;
+  retentionDefaults: { active: number; removed: number };
 }) {
   const [name, setName] = useState(game?.name || '');
   const [subtitle, setSubtitle] = useState(game?.subtitle || '');
@@ -39,6 +43,7 @@ export function GameForm({
   });
   const [legacyRoot, setLegacyRoot] = useState(game?.legacyRoot || '');
   const [error, setError] = useState('');
+  const [retention, setRetention] = useState(() => retentionDraft(game?.restorePointRetention || {}));
   const iconNames = getDictionary().modals.gameForm.icons;
 
   const pick = async (kind: 'icon' | 'directory') => {
@@ -55,6 +60,13 @@ export function GameForm({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    let restorePointRetention;
+    try {
+      restorePointRetention = retentionValues(retention);
+    } catch (reason) {
+      setError((reason as Error).message);
+      return;
+    }
     void onSave({
       id: game?.id,
       name,
@@ -62,19 +74,20 @@ export function GameForm({
       icon,
       color,
       legacyRoot,
+      restorePointRetention,
       locations: {
         win32: {
           root: locations.win32.root,
           items: rawItems.win32
             .split('\n')
-            .map(item => item.trim())
+            .map((item) => item.trim())
             .filter(Boolean),
         },
         darwin: {
           root: locations.darwin.root,
           items: rawItems.darwin
             .split('\n')
-            .map(item => item.trim())
+            .map((item) => item.trim())
             .filter(Boolean),
         },
       },
@@ -84,6 +97,31 @@ export function GameForm({
   return (
     <form onSubmit={submit}>
       <fieldset disabled={busy}>
+        {!game && (
+          <label className="field">
+            <span className="field-label">{t('templates.label')}</span>
+            <select
+              defaultValue=""
+              onChange={(event) => {
+                const template = templates.find((item) => item.id === event.target.value);
+                if (!template) return;
+                setName(template.name);
+                setSubtitle(template.subtitle);
+                setIcon(template.icon);
+                setColor(template.color);
+                setRawItems({ win32: template.items.join('\n'), darwin: template.items.join('\n') });
+              }}
+            >
+              <option value="">{t('templates.empty')}</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} · {template.subtitle}
+                </option>
+              ))}
+            </select>
+            <small>{t('templates.hint')}</small>
+          </label>
+        )}
         <div className="game-form-intro">
           <span className="edit-game-icon" style={{ '--game-color': color } as CSSProperties}>
             <GameGlyph icon={icon} size={33} />
@@ -104,7 +142,7 @@ export function GameForm({
               maxLength={80}
               placeholder={t('modals.gameForm.namePlaceholder')}
               value={name}
-              onChange={event => setName(event.target.value)}
+              onChange={(event) => setName(event.target.value)}
             />
           </label>
           <label className="field">
@@ -113,14 +151,14 @@ export function GameForm({
               maxLength={80}
               placeholder={t('modals.gameForm.subtitlePlaceholder')}
               value={subtitle}
-              onChange={event => setSubtitle(event.target.value)}
+              onChange={(event) => setSubtitle(event.target.value)}
             />
           </label>
         </div>
         <div className="icon-picker">
           <span>{t('modals.gameForm.iconLabel')}</span>
           <div>
-            {icons.map(value => (
+            {icons.map((value) => (
               <button
                 type="button"
                 key={value}
@@ -144,7 +182,7 @@ export function GameForm({
         </div>
         <div className="color-picker">
           <span>{t('modals.gameForm.colorLabel')}</span>
-          {colors.map(value => (
+          {colors.map((value) => (
             <button
               key={value}
               type="button"
@@ -191,7 +229,7 @@ export function GameForm({
                   : t('modals.gameForm.rootDirPlaceholderMac')
               }
               value={locations[tab].root}
-              onChange={event =>
+              onChange={(event) =>
                 setLocations({ ...locations, [tab]: { ...locations[tab], root: event.target.value } })
               }
             />
@@ -199,9 +237,7 @@ export function GameForm({
               type="button"
               disabled={tab !== platform}
               title={
-                tab !== platform
-                  ? t('modals.gameForm.browseOtherOsTitle')
-                  : t('modals.gameForm.browseFolderTitle')
+                tab !== platform ? t('modals.gameForm.browseOtherOsTitle') : t('modals.gameForm.browseFolderTitle')
               }
               onClick={() => void pick('directory')}
             >
@@ -216,7 +252,7 @@ export function GameForm({
             spellCheck={false}
             placeholder={t('modals.gameForm.backupItemsPlaceholder')}
             value={rawItems[tab]}
-            onChange={event => setRawItems({ ...rawItems, [tab]: event.target.value })}
+            onChange={(event) => setRawItems({ ...rawItems, [tab]: event.target.value })}
           />
           <small>{t('modals.gameForm.backupItemsHint')}</small>
         </label>
@@ -226,12 +262,18 @@ export function GameForm({
             <span>{t('modals.gameForm.macWineNotice')}</span>
           </div>
         )}
+        <section className="game-retention">
+          <h3>{t('retention.title')}</h3>
+          <p className="muted">{t('retention.gameHint')}</p>
+          <RetentionFields value={retention} onChange={setRetention} defaults={retentionDefaults} inherit />
+          <p className="muted">{t('retention.description')}</p>
+        </section>
         <details className="advanced-settings">
           <summary>{t('modals.gameForm.legacyRootSummary')}</summary>
           <label className="field">
             <input
               value={legacyRoot}
-              onChange={event => setLegacyRoot(event.target.value)}
+              onChange={(event) => setLegacyRoot(event.target.value)}
               placeholder={t('modals.gameForm.legacyRootPlaceholder')}
             />
             <small>{t('modals.gameForm.legacyRootHint')}</small>
@@ -244,11 +286,7 @@ export function GameForm({
         )}
         <div className="dialog-actions">
           {onDelete && (
-            <button
-              type="button"
-              className="text-button danger-text delete-game-button"
-              onClick={onDelete}
-            >
+            <button type="button" className="text-button danger-text delete-game-button" onClick={onDelete}>
               <Trash2 size={15} />
               {t('modals.gameForm.removeGameBtn')}
             </button>
@@ -265,4 +303,3 @@ export function GameForm({
     </form>
   );
 }
-

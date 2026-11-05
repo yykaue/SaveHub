@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+.test-data/
+docs/screenshots/
+docs/release-audit.json
+pnpm-lock.yaml
