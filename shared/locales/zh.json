@@ -193,7 +193,7 @@
     "restoreGameProject": "找回项目",
     "noRemovedGames": "暂时没有已移除的游戏。",
     "openLogs": "打开日志目录",
-    "logsDesc": "按类型和操作分类记录，全部日志合计最多 20 MB，满额自动淘汰最早记录。",
+    "logsDesc": "按类型和操作分类记录，全部日志共用容量上限，默认 20 MB（1 MB = 1,048,576 字节）。超出容量时自动淘汰最早记录。",
     "manageRemovedGames": "管理已移除的游戏"
   },
   "snapshots": {
@@ -308,6 +308,13 @@
     "emptyActive": "还没有读档恢复点。第一次读档前会自动创建。"
   },
   "import": {
+    "stateFavorite": "已收藏",
+    "stateTrash": "回收站",
+    "stateRestorePoint": "读档恢复点",
+    "stateRemovedPoint": "已移除的恢复点",
+    "overwriteStateHint": "本地记录具有以上状态。覆盖将替换其内容、名称和备注，并保留这些状态。",
+    "retentionAfterImport": "整批导入完成后，将按恢复点保留数量整理，超额记录可能被移除或永久删除。",
+    "protectedOverwriteHint": "本地记录已受保护，不能覆盖。请选择跳过或两者并存。",
     "tagProtected": " · 已保护",
     "tagTrash": " · 回收站",
     "tagRestorePoint": " · 读档恢复点",
@@ -318,7 +325,7 @@
     "foundDuplicates": "发现 {count} 份重复存档",
     "chooseHowToHandle": "请为每份存档选择处理方式，选完后统一执行。",
     "additionalNewSaves": "另有 {count} 份新存档，将在确认后一并导入。",
-    "ruleOverwriteDesc": "替换指定记录的内容与名称、备注，保留其创建时间和收藏标记。",
+    "ruleOverwriteDesc": "替换指定记录的内容与名称、备注，保留其创建时间、收藏标记及所在分类状态。受保护记录不能覆盖。",
     "ruleSkipDesc": "保留已有记录，本次不导入。",
     "ruleKeepBothDesc": "保留已有记录，另存一份带编号的新存档。",
     "bulkAria": "批量设置重复存档",
@@ -331,7 +338,7 @@
     "matchingExistingLabel": "对应已有记录（{count} 份）",
     "overwriteTargetAria": "{name} 的覆盖目标",
     "existingPrefix": "已有：",
-    "cannotOverwriteHint": "该记录不能覆盖，可选择跳过或两者并存。",
+    "cannotOverwriteHint": "该记录损坏或尚未完成永久删除，不能覆盖，可选择跳过或两者并存。",
     "itemActionAria": "{name} 的处理方式",
     "prepareFailedHeader": "检查时有 {count} 份无法导入：",
     "choiceSummary": "新导入 {newCount} · 覆盖 {overwriteCount} · 跳过 {skipCount} · 两者并存 {keepBothCount}",
@@ -481,7 +488,7 @@
       "safetyNotice": "应用会先自动保存当前进度到「读档恢复点」，校验成功后再读档；保存失败则停止读档。之后可用恢复点撤销本次读档。",
       "replaceSummary": "将完整替换：{entries}。目录里新增的文件也会随之移除。",
       "entrySeparator": "、",
-      "confirmCheckbox": "我已关闭游戏，并暂停会写入存档的云同步。",
+      "gameClosedWarning": "我已关闭游戏，并暂停会写入存档的云同步。",
       "cancelBtn": "暂不读档",
       "confirmBtn": "确认读档"
     }
@@ -652,7 +659,7 @@
     "importReplaceStageConflict": "覆盖恢复目录冲突，原存档仍保留在覆盖事务中。",
     "importReplaceTargetMissing": "覆盖目标缺失，已保留事务文件供恢复。",
     "importReplaceTargetChanged": "覆盖目标在复制期间发生变化，原记录已保留，请重新检查。",
-    "importReplaceTargetForbidden": "当前记录不允许覆盖，请选择跳过或两者并存。",
+    "importReplaceTargetForbidden": "受保护、损坏或永久删除未完成的记录不能被导入覆盖，请选择跳过或两者并存。",
     "importReplaceInvalidStage": "覆盖暂存目录无效。",
     "importReplaceBackupExists": "覆盖备份目录已存在。",
     "importReplaceRollbackFailed": "导入覆盖失败，原文件已保留，重新打开应用将继续恢复：{error}；{rollbackError}",
@@ -672,7 +679,6 @@
     "missingDuplicateDecisions": "请为每份重复存档选择处理方式。",
     "invalidDuplicateDecision": "重复存档的处理方式无效。",
     "duplicateOverwriteTarget": "请选择唯一的覆盖目标，不能重复覆盖同一份记录。",
-    "protectedTrashSafetyCannotOverwrite": "保护存档、回收站记录和读档恢复点不能被导入覆盖，请选择跳过或两者并存。",
     "duplicateMatchesChanged": "重复存档的状态已变化，请重新检查后选择处理方式。",
     "overwriteTargetChanged": "覆盖目标已变化，请重新检查后再导入。",
     "invalidNamedExportIndex": "命名导出清单格式无效。",
@@ -730,6 +736,23 @@
     "invalidGameSaveDecision": "游戏存档导入选项无效。",
     "bundleSnapshotIndexChanged": "存档导入清单已变化，请重新检查。",
     "bundleSnapshotSourceChanged": "存档导入源已变化，请重新检查。"
+  },
+  "logs": {
+    "title": "日志保留",
+    "limitLabel": "日志总容量（MB）",
+    "zeroHint": "设置为 0 将清空现有运行日志，并停止保留新日志。事务恢复文件不受影响。",
+    "invalidLimit": "请输入有效的非负整数日志容量。",
+    "save": "保存日志设置",
+    "saving": "保存日志设置中",
+    "saved": "日志设置已保存"
+  },
+  "progress": {
+    "checking": "正在检查并校验文件",
+    "copying": "正在复制文件",
+    "importing": "正在导入记录",
+    "exporting": "正在导出记录",
+    "pruning": "正在整理恢复点保留数量",
+    "preparing": "准备中"
   },
   "retention": {
     "title": "恢复点保留数量",

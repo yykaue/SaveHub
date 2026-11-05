@@ -9,6 +9,7 @@ const suites = [
   'import-interactions',
   'game-interactions',
   'retention-interactions',
+  'optimization-interactions',
 ];
 for (const suite of suites)
   test(suite, async ({ browserName: _browserName }, info) => {

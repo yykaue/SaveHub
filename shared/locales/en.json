@@ -193,7 +193,7 @@
     "restoreGameProject": "Restore Game",
     "noRemovedGames": "No removed games.",
     "openLogs": "Open log folder",
-    "logsDesc": "Logs are separated by type and operation, sharing a 20 MB total limit. Oldest records are removed automatically.",
+    "logsDesc": "Logs are grouped by type and operation and share one capacity limit, defaulting to 20 MB (1 MB = 1,048,576 bytes). Oldest records are removed when the limit is exceeded.",
     "manageRemovedGames": "Manage removed games"
   },
   "snapshots": {
@@ -308,6 +308,13 @@
     "emptyActive": "No restore points yet. One is created automatically before your first restore."
   },
   "import": {
+    "stateFavorite": "Favorite",
+    "stateTrash": "Trash",
+    "stateRestorePoint": "Restore Point",
+    "stateRemovedPoint": "Removed Restore Point",
+    "overwriteStateHint": "The local record has the states shown above. Overwriting replaces its content, name, and note while keeping these states.",
+    "retentionAfterImport": "Restore point limits are applied after the entire import finishes. Excess records may be removed or permanently deleted.",
+    "protectedOverwriteHint": "The local record is protected and cannot be overwritten. Choose Skip or Keep Both.",
     "tagProtected": " · Protected",
     "tagTrash": " · Trash",
     "tagRestorePoint": " · Restore Point",
@@ -318,7 +325,7 @@
     "foundDuplicates": "Found {count} duplicate save(s)",
     "chooseHowToHandle": "Choose how to handle each duplicate save, then apply all at once.",
     "additionalNewSaves": " {count} new save(s) will also be imported upon confirmation.",
-    "ruleOverwriteDesc": "Replaces the target save content, name, and note while keeping its creation time and favorite flag.",
+    "ruleOverwriteDesc": "Replaces the target content, name, and note while keeping its creation time, favorite flag, and category state. Protected records cannot be overwritten.",
     "ruleSkipDesc": "Keeps the existing record and skips importing this item.",
     "ruleKeepBothDesc": "Keeps the existing record and imports a new numbered save alongside it.",
     "bulkAria": "Bulk set duplicate saves",
@@ -331,7 +338,7 @@
     "matchingExistingLabel": "Matching existing saves ({count})",
     "overwriteTargetAria": "Overwrite target for {name}",
     "existingPrefix": "Existing: ",
-    "cannotOverwriteHint": "This record cannot be overwritten. Please choose Skip or Keep Both.",
+    "cannotOverwriteHint": "This record is damaged or has an unfinished permanent deletion. Choose Skip or Keep Both.",
     "itemActionAria": "Action for {name}",
     "prepareFailedHeader": "{count} item(s) could not be prepared for import:",
     "choiceSummary": "New {newCount} · Overwrite {overwriteCount} · Skip {skipCount} · Keep Both {keepBothCount}",
@@ -481,7 +488,7 @@
       "safetyNotice": "SaveHub will automatically back up your current progress to Restore Points and verify it before restoring. If the backup fails, the restore is aborted.",
       "replaceSummary": "Will completely replace: {entries}. Extra files added in those directories will also be removed.",
       "entrySeparator": ", ",
-      "confirmCheckbox": "I have closed the game and paused any cloud sync that writes to save files.",
+      "gameClosedWarning": "I have closed the game and paused any cloud sync that writes to save files.",
       "cancelBtn": "Not Now",
       "confirmBtn": "Confirm Load"
     }
@@ -652,7 +659,7 @@
     "importReplaceStageConflict": "Overwrite recovery directory conflict; original save remains in the replacement transaction.",
     "importReplaceTargetMissing": "Overwrite target missing; transaction file kept for recovery.",
     "importReplaceTargetChanged": "Overwrite target changed during copy; original record was kept. Please check again.",
-    "importReplaceTargetForbidden": "This record cannot be overwritten. Please choose Skip or Keep Both.",
+    "importReplaceTargetForbidden": "Protected or damaged records and records with an unfinished permanent deletion cannot be overwritten by import. Choose Skip or Keep Both.",
     "importReplaceInvalidStage": "Invalid overwrite staging directory.",
     "importReplaceBackupExists": "Overwrite backup directory already exists.",
     "importReplaceRollbackFailed": "Import overwrite failed; original files were kept and recovery will resume on next launch: {error}; {rollbackError}",
@@ -672,7 +679,6 @@
     "missingDuplicateDecisions": "Please choose an action for each duplicate save.",
     "invalidDuplicateDecision": "Invalid action for duplicate save.",
     "duplicateOverwriteTarget": "Please choose a unique overwrite target; cannot overwrite the same record twice.",
-    "protectedTrashSafetyCannotOverwrite": "Protected saves, trashed records, and restore points cannot be overwritten by import. Please choose Skip or Keep Both.",
     "duplicateMatchesChanged": "Duplicate save status changed. Please re-check and choose again.",
     "overwriteTargetChanged": "Overwrite target changed. Please re-check before importing.",
     "invalidNamedExportIndex": "Invalid named export index format.",
@@ -730,6 +736,23 @@
     "invalidGameSaveDecision": "Invalid game save import option.",
     "bundleSnapshotIndexChanged": "Save import index changed. Please check again.",
     "bundleSnapshotSourceChanged": "Save import source changed. Please check again."
+  },
+  "logs": {
+    "title": "Log retention",
+    "limitLabel": "Total log capacity (MB)",
+    "zeroHint": "Set to 0 to clear existing application logs and stop retaining new logs. Transaction recovery files are unaffected.",
+    "invalidLimit": "Enter a valid non-negative whole number for log capacity.",
+    "save": "Save log settings",
+    "saving": "Saving log settings",
+    "saved": "Log settings saved"
+  },
+  "progress": {
+    "checking": "Checking and verifying files",
+    "copying": "Copying files",
+    "importing": "Importing records",
+    "exporting": "Exporting records",
+    "pruning": "Applying restore point retention",
+    "preparing": "Preparing"
   },
   "retention": {
     "title": "Restore point retention",

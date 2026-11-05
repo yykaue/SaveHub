@@ -14,6 +14,7 @@ import { Logo } from '../art';
 import { formatBytes } from '../format';
 import { SUPPORTED_LANGUAGES, t } from '../i18n';
 import { RetentionSettings } from '../components/RetentionSettings';
+import { LogSettings } from '../components/LogSettings';
 import type { AppState, Language, RestorePointRetention } from '../types';
 
 export function SettingsPage({
@@ -23,6 +24,7 @@ export function SettingsPage({
   onLanguage,
   onOpen,
   onRetention,
+  onLogLimit,
   onRemovedGames,
   onHelp,
 }: {
@@ -32,6 +34,7 @@ export function SettingsPage({
   onLanguage: (language: Language) => void;
   onOpen: (kind: 'vault' | 'logs') => void;
   onRetention: (value: RestorePointRetention) => Promise<unknown>;
+  onLogLimit: (value: number) => Promise<unknown>;
   onRemovedGames: () => void;
   onHelp: () => void;
 }) {
@@ -69,6 +72,13 @@ export function SettingsPage({
         busy={busy}
         onSave={onRetention}
       />
+      <LogSettings
+        key={state.logLimitMB}
+        value={state.logLimitMB}
+        busy={busy}
+        onSave={onLogLimit}
+        onOpen={() => onOpen('logs')}
+      />
       <section className="settings-card">
         <h2>
           <HardDrive size={20} />
@@ -87,10 +97,6 @@ export function SettingsPage({
           <span>{t('settings.metricStorage', { size: formatBytes(storageBytes) })}</span>
           <span>{state.platform === 'darwin' ? 'macOS / Apple Silicon' : 'Windows'}</span>
         </div>
-        <p>{t('settings.logsDesc')}</p>
-        <button className="button secondary small" onClick={() => onOpen('logs')}>
-          {t('settings.openLogs')}
-        </button>
       </section>
       <section className="settings-card">
         <h2>

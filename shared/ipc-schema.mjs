@@ -1,3 +1,4 @@
+import { validLogLimit } from './log-settings.mjs';
 /** Runtime checks complement the shared compile-time contract before any handler runs. */
 /** @typedef {(value: unknown) => boolean} Validator */
 /** @type {Validator} */
@@ -38,6 +39,7 @@ export const IPC_SCHEMA = {
   state: [],
   setTheme: [oneOf(['ink', 'tech', 'cyber', 'glass'])],
   setLanguage: [oneOf(['zh', 'en'])],
+  setLogLimitMB: [validLogLimit],
   setRestorePointRetention: [
     (value) =>
       object(value) &&

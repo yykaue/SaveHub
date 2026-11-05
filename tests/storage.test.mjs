@@ -1007,7 +1007,9 @@ test('failure while automatically saving current progress stops restore before a
       writeFileSync(path.join(source, 'preferences'), 'current-settings-updated');
     }
   };
-  await assert.rejects(store.restoreSnapshot(id, snapshot.id), /发生变化|校验失败/);
+  await assert.rejects(store.restoreSnapshot(id, snapshot.id), (error) =>
+    ['storage.fileChanging', 'storage.backupChangedOrVerifyFailed'].includes(error.code),
+  );
   assert(mutated);
   assert.equal(await read(path.join(source, 'saves', '角色 1.sl2')), 'current-progress');
   assert.equal(await read(path.join(source, 'preferences')), 'current-settings-updated');
@@ -1102,7 +1104,9 @@ test('files changing during backup cause it to fail without a committed snapshot
       writeFileSync(path.join(source, 'preferences'), 'changed-while-copying');
     }
   };
-  await assert.rejects(save(store, id), /发生变化|校验失败/);
+  await assert.rejects(save(store, id), (error) =>
+    ['storage.fileChanging', 'storage.backupChangedOrVerifyFailed'].includes(error.code),
+  );
   assert.equal((await store.snapshots(id)).length, 0);
 });
 

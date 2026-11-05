@@ -3,8 +3,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { assertNoLinks, missing } from './fs-utils.mjs';
+import { DEFAULT_LOG_LIMIT_MB, BYTES_PER_MB } from '../shared/log-settings.mjs';
 
-export const MAX_LOG_BYTES = 20 * 1024 * 1024;
+export const MAX_LOG_BYTES = DEFAULT_LOG_LIMIT_MB * BYTES_PER_MB;
 const operations = new Set([
   'application',
   'startup',
@@ -141,7 +142,7 @@ export class Logger {
   /** @param {Set<string>} affected */
   trim(affected) {
     this.records.sort((a, b) => a.time.localeCompare(b.time) || a.sequence - b.sequence);
-    while (this.totalBytes >= this.maxBytes && this.records.length > 1) {
+    while (this.totalBytes > this.maxBytes && this.records.length) {
       const oldest = this.records.shift();
       if (!oldest) break;
       this.totalBytes -= oldest.bytes;
@@ -153,22 +154,43 @@ export class Logger {
   async rewrite(files) {
     for (const file of files) {
       await assertNoLinks(file);
+      const records = this.records.filter((record) => record.file === file);
+      if (!records.length) {
+        await fs.rm(file, { force: true });
+        continue;
+      }
       await fs.mkdir(path.dirname(file), { recursive: true });
       const temp = `${file}.${randomUUID()}.tmp`;
       try {
-        await fs.writeFile(
-          temp,
-          this.records
-            .filter((record) => record.file === file)
-            .map((record) => record.line)
-            .join(''),
-          { flag: 'wx' },
-        );
+        await fs.writeFile(temp, records.map((record) => record.line).join(''), { flag: 'wx' });
         await fs.rename(temp, file);
       } finally {
         await fs.rm(temp, { force: true }).catch(() => {});
       }
     }
+  }
+
+  /** Apply a new shared budget in queue order, including clearing all retained logs at zero. @param {number} maxBytes */
+  setMaxBytes(maxBytes) {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('Invalid log byte limit');
+    const update = this.queue.then(async () => {
+      this.maxBytes = maxBytes;
+      if (!this.loaded) await this.load();
+      else {
+        const affected = new Set();
+        this.trim(affected);
+        await this.rewrite(affected);
+      }
+      if (maxBytes === 0) this.entries = [];
+      this.lastError = null;
+    });
+    this.queue = update.catch((error) => {
+      this.lastError = String(error);
+      this.loaded = false;
+      this.records = [];
+      this.totalBytes = 0;
+    });
+    return update;
   }
 
   /** @param {'info' | 'warn' | 'error'} level @param {string} event @param {Record<string, unknown>} [details] */
@@ -189,6 +211,7 @@ export class Logger {
     };
     this.queue = this.queue.then(async () => {
       try {
+        if (this.maxBytes === 0) return;
         if (!(await fs.stat(this.dataDir)).isDirectory()) return;
         await this.load();
         const record = this.appendRecord(entry);

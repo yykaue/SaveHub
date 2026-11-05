@@ -225,6 +225,7 @@ function registerHandlers() {
   register('state', async () => ({ ...(await activeStore.state()), version: app.getVersion() }));
   register('setTheme', (theme) => activeStore.setTheme(theme));
   register('setRestorePointRetention', (value) => activeStore.setRestorePointRetention(value));
+  register('setLogLimitMB', (value) => activeStore.setLogLimitMB(value));
   register('setLanguage', async (language) => {
     await activeStore.setLanguage(language);
     updateApplicationMenu();

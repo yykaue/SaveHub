@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import { progressRange, progressTask } from './progress.mjs';
 
 import {
   EXPORT_INDEX,
@@ -91,8 +92,18 @@ export async function namedExportCandidates(store, directory) {
    * @param {string} folder
     */
 export async function writeExport(store, gameId, meta, folder) {
-  await copyRecords(path.join(store.snapshotDir(gameId, meta.id), 'payload'), folder, meta.records, store.onProgress);
-  const copy = await inventory(folder, meta.entries, { allowMissing: true, lang: store.lang });
+  await copyRecords(
+    path.join(store.snapshotDir(gameId, meta.id), 'payload'),
+    folder,
+    meta.records,
+    progressRange(store.onProgress, 0, 80),
+  );
+  store.onProgress({ phase: 'checking', detail: meta.label, completed: 0, percent: 80 });
+  const copy = await inventory(folder, meta.entries, {
+    allowMissing: true,
+    lang: store.lang,
+    progress: progressRange(store.onProgress, 80, 100),
+  });
   if (signature(copy) !== signature(meta)) throw store.error('storage.exportWriteVerifyFailed');
 }
 
@@ -121,7 +132,18 @@ export async function exportSnapshots(store, gameId, selection, destination) {
       throw store.error('storage.exportDirInsideVault');
     }
     const metas = [];
-    for (const id of selected) metas.push(await store.verify(gameId, id));
+    for (const [index, id] of selected.entries()) {
+      metas.push(
+        await progressTask(
+          store,
+          'checking',
+          '',
+          (20 * index) / selected.length,
+          (20 * (index + 1)) / selected.length,
+          () => store.verify(gameId, id),
+        ),
+      );
+    }
     const totalBytes = metas.reduce((sum, meta) => sum + (meta.bytes || 0), 0);
     await assertDiskSpace(destination, totalBytes, store.lang);
     const batchId = randomUUID();
@@ -142,8 +164,14 @@ export async function exportSnapshots(store, gameId, selection, destination) {
     await fs.mkdir(stage);
     try {
       for (const [index, meta] of metas.entries()) {
-        store.onProgress({ phase: 'exporting', completed: index, total: metas.length, detail: meta.label });
-        await store.writeExport(gameId, meta, path.join(stage, directories[index]));
+        await progressTask(
+          store,
+          'exporting',
+          meta.label,
+          20 + (70 * index) / metas.length,
+          20 + (70 * (index + 1)) / metas.length,
+          () => store.writeExport(gameId, meta, path.join(stage, directories[index])),
+        );
       }
       // Claim a fresh bundle only after all payloads are verified. Never replace
       // a folder created by another process after our name preflight.
@@ -151,7 +179,7 @@ export async function exportSnapshots(store, gameId, selection, destination) {
       await fs.mkdir(folder);
       folderCreated = true;
       await fs.mkdir(indexDir);
-      for (const name of directories) {
+      for (const [index, name] of directories.entries()) {
         const target = path.join(folder, name),
           source = path.join(stage, name);
         await store.fault('before-export-publish', { directory: name, folder });
@@ -160,6 +188,13 @@ export async function exportSnapshots(store, gameId, selection, destination) {
         for (const child of await fs.readdir(source)) {
           await fs.rename(path.join(source, child), path.join(target, child));
         }
+        store.onProgress({
+          phase: 'exporting',
+          detail: name,
+          completed: index + 1,
+          total: directories.length,
+          percent: 90 + (9 * (index + 1)) / directories.length,
+        });
       }
       await atomicJson(indexFile, {
         version: 2,
@@ -168,6 +203,13 @@ export async function exportSnapshots(store, gameId, selection, destination) {
         gameName: game.name,
         exportedAt: new Date().toISOString(),
         snapshots: metas.map((manifest, index) => ({ directory: directories[index], manifest })),
+      });
+      store.onProgress({
+        phase: 'exporting',
+        detail: game.name,
+        completed: metas.length,
+        total: metas.length,
+        percent: 100,
       });
       return { folder, count: metas.length, directories, indexFile };
     } catch (error) {

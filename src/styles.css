@@ -2492,6 +2492,16 @@ select option {
   margin-top: 22px;
   line-height: 1.6;
 }
+.restore-warning {
+  font-size: 16px;
+  font-weight: 650;
+  color: #c43f46;
+  margin-top: 22px;
+  line-height: 1.6;
+}
+[data-theme='cyber'] .restore-warning {
+  color: #ff7777;
+}
 input[type='checkbox'] {
   width: 15px;
   height: 15px;
@@ -2749,6 +2759,36 @@ input[type='checkbox'] {
   accent-color: var(--accent);
   margin: 0;
 }
+.import-overwrite-warning {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.import-overwrite-warning > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--red);
+}
+.import-state-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.import-state-tags span {
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-weight: 600;
+  color: var(--text);
+}
 .import-choice-summary {
   color: var(--muted);
   font-size: 11px;
@@ -2811,9 +2851,9 @@ input[type='checkbox'] {
   bottom: 25px;
   left: calc(50% + 105px);
   transform: translateX(-50%);
-  width: 410px;
+  width: 480px;
   max-width: 80vw;
-  padding: 18px 20px 21px;
+  padding: 18px 20px 26px;
   background: var(--modal-bg);
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -2832,27 +2872,28 @@ input[type='checkbox'] {
   flex: 1;
 }
 .progress-panel strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 .progress-panel p {
   color: var(--faint);
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 7px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .progress-panel > span {
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--text);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
 }
 .progress-bar {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 3px;
+  height: 7px;
   background: var(--accent-soft);
 }
 .progress-bar i {
@@ -2860,6 +2901,31 @@ input[type='checkbox'] {
   height: 100%;
   background: var(--accent);
   transition: width 0.2s;
+}
+.progress-bar.indeterminate i {
+  animation: progress-indeterminate 1.3s ease-in-out infinite alternate;
+}
+@keyframes progress-indeterminate {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(185%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar.indeterminate i {
+    animation: none;
+  }
+}
+.log-limit-field {
+  max-width: 260px;
+}
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
 }
 .toast {
   position: fixed;

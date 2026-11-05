@@ -221,7 +221,7 @@ test('game skip also skips bundled records and game overwrite revives a deleted 
   assert.equal((await f.store.snapshots(f.id)).length, 1);
 });
 
-test('bundled saves independently mix overwrite, skip and keep-both while protected, trash and safety targets stay non-overwritable', async (t) => {
+test('bundled saves allow trash and restore point overwrites while protected targets stay non-overwritable', async (t) => {
   const f = await fixture(t);
   const saved = await marks(f);
   const folder = await f.bundle(true);
@@ -229,7 +229,7 @@ test('bundled saves independently mix overwrite, skip and keep-both while protec
   const plan = result.review.games[0].snapshots;
   assert.equal(plan.items.filter((item) => item.matches.length).length, 4);
   assert.equal((await f.store.snapshots(f.id, true)).length, 4);
-  for (const id of [saved.protectedSave.id, saved.trash.id, saved.safety.id]) {
+  for (const id of [saved.protectedSave.id]) {
     const invalid = saveChoices(result.review);
     const item = plan.items.find((item) => item.matches.some((match) => match.id === id));
     invalid[0].decisions.find((choice) => choice.itemId === item.id).action = 'overwrite';
@@ -241,12 +241,18 @@ test('bundled saves independently mix overwrite, skip and keep-both while protec
     'overwrite';
   valid[0].decisions.find((choice) => plan.items.find((item) => item.id === choice.itemId).name === '保护存档').action =
     'keep-both';
+  for (const id of [saved.trash.id, saved.safety.id]) {
+    const item = plan.items.find((item) => item.matches.some((match) => match.id === id));
+    valid[0].decisions.find((choice) => choice.itemId === item.id).action = 'overwrite';
+  }
   const report = await f.store.executeGameImport(result.review.id, valid);
-  assert.deepEqual(report.snapshots[0].report.overwritten, ['普通存档']);
+  assert.deepEqual(report.snapshots[0].report.overwritten.sort(), ['普通存档', '回收站', '读档恢复点'].sort());
   assert.deepEqual(report.snapshots[0].report.keptBoth, ['保护存档 (2)']);
   assert.equal((await f.store.snapshots(f.id, true)).length, 5);
   const original = await f.store.readSnapshot(f.id, saved.ordinary.id);
   assert(original.favorite);
+  assert((await f.store.readSnapshot(f.id, saved.trash.id)).deletedAt);
+  assert.equal((await f.store.readSnapshot(f.id, saved.safety.id)).kind, 'safety');
 });
 
 test('forged, duplicate, incomplete or stale game choices reject before any configuration is committed', async (t) => {

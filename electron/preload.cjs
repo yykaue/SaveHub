@@ -14,6 +14,7 @@ const METHODS = [
   'state',
   'setTheme',
   'setLanguage',
+  'setLogLimitMB',
   'setRestorePointRetention',
   'saveGame',
   'removeGame',

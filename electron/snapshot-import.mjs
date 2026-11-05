@@ -21,6 +21,7 @@ import {
 } from './fs-utils.mjs';
 
 import { recoverJournals } from './recovery.mjs';
+import { progressTask } from './progress.mjs';
 
 /**
  * @param {import('./storage.mjs').SaveStore} store
@@ -85,7 +86,7 @@ export async function replaceImportedSnapshot(store, gameId, original, stage, to
   if (!equal(current, original)) {
     throw store.error('storage.importReplaceTargetChanged');
   }
-  if (current.protected || current.deletedAt || current.purgePending || current.kind === 'safety') {
+  if (current.protected || current.purgePending) {
     throw store.error('storage.importReplaceTargetForbidden');
   }
   const journal = { version: 1, token, gameId, id: original.id, status: 'prepared' };
@@ -304,10 +305,19 @@ export async function prepareImportPlan(store, gameId, directory, { game = store
         candidate.favorite = meta.favorite;
         candidate.protected = meta.protected;
       }
-      const data = await inventory(candidate.source, candidate.entries || entries, {
-        allowMissing: Boolean(candidate.allowMissing),
-        lang: store.lang,
-      });
+      const data = await progressTask(
+        store,
+        'checking',
+        candidate.name,
+        (100 * index) / candidates.length,
+        (100 * (index + 1)) / candidates.length,
+        () =>
+          inventory(candidate.source, candidate.entries || entries, {
+            allowMissing: Boolean(candidate.allowMissing),
+            lang: store.lang,
+            progress: store.onProgress,
+          }),
+      );
       if (candidate.meta && signature(data) !== signature(candidate.meta)) {
         throw store.error('storage.exportIntegrityFailed');
       }
@@ -321,6 +331,8 @@ export async function prepareImportPlan(store, gameId, directory, { game = store
       });
     } catch (error) {
       plan.failed.push({ name: candidate.name, error: /** @type {Error} */ (error).message });
+    } finally {
+      store.onProgress({ phase: 'checking', completed: index + 1, total: candidates.length, detail: candidate.name });
     }
   }
   if (!bundle) store.pendingImport = plan;
@@ -349,7 +361,10 @@ export async function executeImportPlan(store, planId, decisions) {
   const game = store.game(plan.gameId);
   const choices = await store.validateImportPlan(plan, decisions);
   store.pendingImport = null; // An execution token is single use, including partial failure.
-  return store.applyImportPlan(plan, choices, game);
+  const report = await progressTask(store, 'importing', '', 0, 95, () => store.applyImportPlan(plan, choices, game));
+  // Enforce both queues only after every import/overwrite/skip has finished.
+  await progressTask(store, 'pruning', '', 95, 100, () => store.pruneRestorePoints(game.id));
+  return report;
 }
 
 /**
@@ -384,8 +399,8 @@ export async function validateImportPlan(store, plan, decisions) {
       if (!target || targets.has(target.id)) {
         throw store.error('storage.duplicateOverwriteTarget');
       }
-      if (target.protected || target.deletedAt || target.purgePending || target.kind === 'safety') {
-        throw store.error('storage.protectedTrashSafetyCannotOverwrite');
+      if (target.protected || target.purgePending || target.corrupted) {
+        throw store.error('storage.importReplaceTargetForbidden');
       }
       targets.add(target.id);
     }
@@ -423,6 +438,7 @@ export async function applyImportPlan(store, plan, choices, game) {
     const choice = choices.get(item.id);
     if (choice?.action === 'skip') {
       report.skipped.push(item.name);
+      store.onProgress({ phase: 'importing', completed: index + 1, total: plan.items.length, detail: item.name });
       continue;
     }
     try {
@@ -448,39 +464,48 @@ export async function applyImportPlan(store, plan, choices, game) {
       ) {
         throw store.error('storage.overwriteTargetChanged');
       }
-      await store.capture(game, item.source, item.entries || plan.entries, {
-        label,
-        note: item.note || store.t('storage.importedFromNote', { source: item.source }),
-        kind: 'imported',
-        allowMissing: Boolean(item.allowMissing),
-        origin: {
-          path: item.source,
-          ...(item.bundle && item.meta ? { gameId: item.meta.gameId, snapshotId: item.meta.id } : {}),
-        },
-        favorite: item.favorite,
-        protected: item.protected,
-        expectedFingerprint: item.fingerprint,
-        replace,
-        metadata:
-          item.bundle && item.meta
-            ? {
-                kind: item.meta.kind,
-                platform: item.meta.platform,
-                createdAt: item.meta.createdAt,
-                updatedAt: item.meta.updatedAt || item.meta.createdAt,
-                ...(item.meta.deletedAt ? { deletedAt: item.meta.deletedAt } : {}),
-              }
-            : undefined,
-      });
+      await progressTask(
+        store,
+        'importing',
+        item.name,
+        (100 * index) / plan.items.length,
+        (100 * (index + 1)) / plan.items.length,
+        () =>
+          store.capture(game, item.source, item.entries || plan.entries, {
+            label,
+            note: item.note || store.t('storage.importedFromNote', { source: item.source }),
+            kind: 'imported',
+            allowMissing: Boolean(item.allowMissing),
+            origin: {
+              path: item.source,
+              ...(item.bundle && item.meta ? { gameId: item.meta.gameId, snapshotId: item.meta.id } : {}),
+            },
+            favorite: item.favorite,
+            protected: item.protected,
+            expectedFingerprint: item.fingerprint,
+            replace,
+            metadata:
+              item.meta && (item.bundle || item.meta.kind === 'safety')
+                ? {
+                    kind: item.meta.kind,
+                    platform: item.meta.platform,
+                    createdAt: item.meta.createdAt,
+                    updatedAt: item.meta.updatedAt || item.meta.createdAt,
+                    ...(item.meta.deletedAt ? { deletedAt: item.meta.deletedAt } : {}),
+                  }
+                : undefined,
+          }),
+      );
       names.add(foldedName(label));
       if (choice?.action === 'overwrite') report.overwritten.push(item.name);
       else if (choice?.action === 'keep-both') report.keptBoth.push(label);
       else report.imported.push(item.name);
     } catch (error) {
       report.failed.push({ name: item.name, error: /** @type {Error} */ (error).message });
+    } finally {
+      store.onProgress({ phase: 'importing', completed: index + 1, total: plan.items.length, detail: item.name });
     }
   }
-  await store.pruneRestorePoints(game.id);
   return report;
 }
 

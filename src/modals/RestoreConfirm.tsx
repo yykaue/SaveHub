@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Archive, ArrowRight, Folder, History, LoaderCircle, RotateCcw, ShieldCheck } from 'lucide-react';
 import { GameGlyph } from '../art';
 import { formatBytes, fullDate, gameName } from '../format';
@@ -20,8 +19,6 @@ export function RestoreConfirm({
   onConfirm: () => Promise<unknown>;
   onCancel: () => void;
 }) {
-  const [confirmed, setConfirmed] = useState(false);
-
   return (
     <>
       <div className="restore-card">
@@ -57,20 +54,12 @@ export function RestoreConfirm({
           entries: snapshot.entries.join(t('modals.restoreConfirm.entrySeparator')),
         })}
       </p>
-      <label className="confirm-checkbox">
-        <input
-          type="checkbox"
-          checked={confirmed}
-          disabled={busy}
-          onChange={(event) => setConfirmed(event.target.checked)}
-        />
-        <span>{t('modals.restoreConfirm.confirmCheckbox')}</span>
-      </label>
+      <p className="restore-warning">{t('modals.restoreConfirm.gameClosedWarning')}</p>
       <div className="dialog-actions">
         <button className="button secondary" disabled={busy} onClick={onCancel}>
           {t('modals.restoreConfirm.cancelBtn')}
         </button>
-        <button className="button primary" disabled={!confirmed || busy} onClick={() => void onConfirm()}>
+        <button className="button primary" disabled={busy} onClick={() => void onConfirm()}>
           {busy ? <LoaderCircle size={16} className="spin" /> : <RotateCcw size={16} />}
           {t('modals.restoreConfirm.confirmBtn')}
         </button>

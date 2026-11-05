@@ -4,15 +4,20 @@ import { formatBytes, fullDate } from './format';
 import { t } from './i18n';
 import type { ImportAction, ImportDecision, ImportItem, ImportPlan, ImportReport, Snapshot } from './types';
 
-const canOverwrite = (snapshot: Snapshot) =>
-  !snapshot.protected &&
-  !snapshot.deletedAt &&
-  !snapshot.purgePending &&
-  !snapshot.corrupted &&
-  snapshot.kind !== 'safety';
+const canOverwrite = (snapshot: Snapshot) => !snapshot.protected && !snapshot.purgePending && !snapshot.corrupted;
 const initialTarget = (item: ImportItem) => item.matches.find(canOverwrite) || item.matches[0];
+const stateLabels = (snapshot: Snapshot) =>
+  [
+    snapshot.favorite && t('import.stateFavorite'),
+    snapshot.kind === 'safety'
+      ? t(snapshot.deletedAt ? 'import.stateRemovedPoint' : 'import.stateRestorePoint')
+      : snapshot.deletedAt && t('import.stateTrash'),
+  ].filter(Boolean);
 const targetDescription = (snapshot: Snapshot) =>
-  `${snapshot.label} · ${fullDate(snapshot.createdAt)} · ${formatBytes(snapshot.bytes)}${snapshot.protected ? t('import.tagProtected') : ''}${snapshot.deletedAt ? t('import.tagTrash') : ''}${snapshot.kind === 'safety' ? t('import.tagRestorePoint') : ''}${snapshot.purgePending ? t('import.tagPurgePending') : ''}`;
+  [
+    `${snapshot.label} · ${fullDate(snapshot.createdAt)} · ${formatBytes(snapshot.bytes)}${snapshot.protected ? t('import.tagProtected') : ''}${snapshot.purgePending ? t('import.tagPurgePending') : ''}`,
+    ...stateLabels(snapshot),
+  ].join(' · ');
 
 export function ImportConflicts({
   plan,
@@ -162,7 +167,7 @@ export function ImportConflicts({
                 {!canOverwrite(target) && (
                   <p className="import-protected">
                     <ShieldCheck size={14} />
-                    {t('import.cannotOverwriteHint')}
+                    {t(snapshotHint(target))}
                   </p>
                 )}
                 <fieldset className="import-options" aria-label={t('import.itemActionAria', { name: item.name })}>
@@ -180,6 +185,20 @@ export function ImportConflicts({
                     </label>
                   ))}
                 </fieldset>
+                {choice.action === 'overwrite' && stateLabels(target).length > 0 && (
+                  <div className="import-overwrite-warning" role="status">
+                    <Info size={16} />
+                    <div>
+                      <div className="import-state-tags">
+                        {stateLabels(target).map((label) => (
+                          <span key={String(label)}>{label}</span>
+                        ))}
+                      </div>
+                      <p>{t('import.overwriteStateHint')}</p>
+                      {target.kind === 'safety' && <p>{t('import.retentionAfterImport')}</p>}
+                    </div>
+                  </div>
+                )}
               </section>
             );
           })}
@@ -217,6 +236,9 @@ export function ImportConflicts({
     </form>
   );
 }
+
+const snapshotHint = (snapshot: Snapshot) =>
+  snapshot.protected ? 'import.protectedOverwriteHint' : 'import.cannotOverwriteHint';
 
 export function ImportResult({
   report,

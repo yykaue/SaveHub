@@ -117,7 +117,7 @@ try {
   await fs.writeFile(liveFile, 'portable-live-progress-before-restore');
   await page.getByRole('button', { name: '读档', exact: true }).click();
   await expect(dialog.getByRole('button', { name: '确认读档', exact: true })).toBeDisabled();
-  await dialog.getByRole('checkbox').check();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0);
   await dialog.getByRole('button', { name: '确认读档', exact: true }).click();
   await expect(dialog).toHaveCount(0, { timeout: 30000 });
   assert.deepEqual(await fs.readFile(liveFile), original);

@@ -98,8 +98,9 @@ await runE2E('smoke', async (harness) => {
   const liveSave = path.join(presets[0].locations[process.platform].root, 'saves', 'progress.dat');
   await fs.writeFile(liveSave, 'live-before-restore');
   await page.getByRole('button', { name: '读档', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: '确认读档', exact: true })).toBeDisabled();
-  await dialog.getByRole('checkbox').check();
+  await expect(dialog.getByRole('button', { name: '确认读档', exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0);
+  await expect(dialog.locator('.restore-warning')).toHaveText('我已关闭游戏，并暂停会写入存档的云同步。');
   await dialog.getByRole('button', { name: '确认读档', exact: true }).click();
   await expect(dialog).toHaveCount(0, { timeout: 30000 });
   assert.equal((await fs.stat(liveSave)).size, 4 * 1024 * 1024);

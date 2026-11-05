@@ -10,7 +10,7 @@ Windows: Open `release/1.1.5/win-unpacked/SaveHub.exe`, or use the installer / p
 
 1. On first launch the library is empty. Add a game using an optional template or a blank project, then open **Game Settings**. Confirm the **Game Save Root Directory** for your current OS and the **Relative Paths to Back Up**.
 2. Close the game, click **New Save**, and enter a name and optional notes.
-3. Click **Restore** on a save and confirm that both the game and any cloud sync services that write to save files are closed. SaveHub first automatically backs up and verifies your current progress before restoring the selected save; if the automatic backup fails, the restore stops immediately.
+3. Click **Restore** on a save and confirm that both the game and any cloud sync services that write to save files are closed. The dialog displays a larger red reminder; no checkbox is required before clicking **Confirm Restore**. SaveHub first automatically backs up and verifies your current progress before restoring the selected save; if the automatic backup fails, the restore stops immediately.
 4. To undo a restore, find `Before Restore · …` (`读档前 · …`) under **Restore Points** on the right side of the timeline and click **Restore**.
 
 Games added from templates can be edited or removed, and you can add any custom game. Icons support built-in emblems as well as local PNG / JPG / WebP / ICO images. Imported images are copied into the configuration directory so they do not depend on the original file remaining in place.
@@ -34,7 +34,9 @@ The `source` variable in legacy scripts corresponds to the legacy backup folder.
 
 **Import Legacy Saves** copies all `ArchiveFile…` subdirectories inside a legacy backup folder, supporting custom suffixes such as `ArchiveFile0` or `ArchiveFile10th-DLC-1st-1level`. **Import Saves** also accepts a single legacy save folder, a single named export folder, or a batch export root folder, as well as legacy `manifest.json` / `collection.json` exports. When duplicates are detected, all duplicate items are listed in a single dialog where each item can independently be set to **Overwrite**, **Skip**, or **Keep Both** (or batch-configured and then adjusted individually) before clicking **Execute Import**. Nothing in the batch is written before confirmation, and cancelling aborts the entire batch import.
 
-Within the same game, re-importing the same source directory is recognized as a duplicate even if its contents have been updated; different source directories are never merged solely because their file contents match. The default conflict action is **Skip**. **Overwrite** first copies and verifies the incoming files, then replaces the selected existing record while preserving its ID, creation time, and favorite mark; if multiple existing records share the same source, you can choose which target record to overwrite. Protected saves, Recycle Bin records, and Restore Points cannot be overwritten—you can choose **Skip** or **Keep Both** instead. **Keep Both** generates an independent ID and appends ` (2)`, ` (3)`, etc. to the name. If an overwrite fails, the original record is restored, and interrupted transactions are recovered on next launch. The import summary lists newly imported, overwritten, kept-both, skipped, and failed items separately; source files being imported are always left untouched.
+Within the same game, re-importing the same source directory is recognized as a duplicate even if its contents have been updated; different source directories are never merged solely because their file contents match. The default conflict action is **Skip**. **Overwrite** first copies and verifies the incoming files, then replaces the selected existing record while preserving its ID, creation time, favorite mark, and category state, and refreshing its modification time. If multiple existing records share the same source, you can choose the target. Protected local records only allow **Skip** or **Keep Both**. Unprotected Favorites, Recycle Bin records, Restore Points, and Removed Restore Points allow all three actions; choosing Overwrite displays the local state badges and a reminder below the options. Damaged records and unfinished permanent deletions still require resolving the underlying problem. **Keep Both** generates an independent ID and appends ` (2)`, ` (3)`, etc. to the name. Failed replacements restore the original, and interrupted transactions recover on next launch. Results list newly imported, overwritten, kept-both, skipped, and failed items separately; import source files remain untouched.
+
+Imports and exports show a progress bar, percentage, current stage, and the record or file being processed. Batch progress includes verification, copying, and final maintenance; large file copies update by bytes transferred.
 
 ## Features
 
@@ -104,6 +106,8 @@ Selected Export Directory/
 
 Each export generates an independent outer folder, automatically appending ` (2)`, ` (3)`, etc. if a folder of the same name already exists; duplicate save names within the same batch are also numbered automatically without overwriting existing files. Illegal filename characters are sanitized for folder names while preserving the original game name and save names in the manifest. All contents are copied and verified in staging before being committed to the named output directory; if an export fails normally, the partial output from that run is cleaned up while preserving any pre-existing files. Moving or sharing the entire outer folder preserves original names, notes, favorites, and protection marks—simply select the outer folder (or any individual named save folder inside it) when importing. Legacy exports without an outer folder and `manifest.json` / `collection.json` exports remain fully importable. Exported Recycle Bin records are imported as normal active saves rather than deleted records.
 
+Imported Restore Points retain their restore point category and removed state. Overwriting preserves the local target's category and state.
+
 Automatic safety backups from v1.0.0 remain in their original location and have been displayed under **Restore Points** since v1.1.0 without copying or migrating files. v1.1.2 kept manual **Protected** saves separate from automatic **Restore Points** and shifted deletion protection from Favorites to Protected. v1.1.3 unified **All Saves** to include Favorited and Protected records and added batch permanent deletion and recovery. v1.1.4 required recovering Recycle Bin records before changing protection marks and added the dedicated outer folder for all exports. Existing badges and save payloads require no migration.
 
 ## Storage & Recovery Rules
@@ -148,7 +152,8 @@ Historical verification (not evidence for this 1.1.5 build): on 2026-11-03, sour
 - Both queues evict the oldest record **modification time (updatedAt)**. Active overflow moves to Removed Restore Points; removed overflow is physically deleted without additional prompts. Favorites and protection marks do not exempt restore points from these limits. Ordinary saves are unaffected.
 - For active limit N, recovering K records requires **N > 0 and 1 ≤ K ≤ N**. Oversized batches are rejected in full. With N=0, both single and batch recovery are disabled. A valid recovery refreshes modification time, preserves creation time, then applies both queue limits even if the active queue was already full.
 - Transaction safety copies survive until commit or successful rollback, including 0/0 settings. Legacy libraries adopt 5/15; a missing updatedAt uses the valid creation time. Old maxRestorePoints=0 does not mean unlimited retention anymore. Review limits before upgrading an existing library.
-- Runtime logs share **one 20 MiB (20,971,520-byte) budget**, split by level and operation. Complete oldest records are trimmed globally; legacy rotations are migrated. Transaction journals are excluded. Open the directory from Settings.
+- Imports finish the entire batch before applying both queue limits, including when a limit is 0. Combined game imports finish all games and bundled saves before pruning. Successful import counts describe completed imports; fewer records may remain after retention.
+- Runtime logs share a configurable total capacity in **Settings & About → Log retention**, defaulting to **20 MB (20,971,520 bytes)**. Nonnegative whole numbers are accepted; oldest complete records are trimmed globally when the limit is exceeded or reduced. **0 clears existing application logs and stops retaining new logs**, including after restart. Transaction recovery files are excluded. Settings also provides a button to open the log directory.
 
 ## Development & Build
 
@@ -182,6 +187,7 @@ pnpm test:ui             # Electron E2E smoke test & 4-theme screenshots
 pnpm test:interactions   # Theme return, batch actions, badges, sorting & transitions
 pnpm test:deletion       # Batch recover, permanent delete & interrupted purge retry
 pnpm test:import         # Per-item duplicate import resolution, mixed batch, cancel & 4 themes
+pnpm test:optimizations  # Overwrite state badges, log capacity, transfer progress and restore reminders
 pnpm pack:win            # Windows unpacked directory build
 pnpm dist:win            # Windows NSIS installer + single-file portable executable
 pnpm pack:mac            # macOS arm64 unpacked bundle (.app)
@@ -204,7 +210,7 @@ electron/i18n.mjs          Main-process & storage-layer i18n dictionaries and ke
 electron/preload.cjs       Minimal, explicitly enumerated renderer bridge API
 electron/retention.mjs     Two-queue retention and batch recovery validation
 electron/restore-transaction.mjs Restore commit, rollback and startup recovery
-electron/classified-logger.mjs 20 MiB classified runtime logs
+electron/classified-logger.mjs Configurable classified runtime logs (20 MB by default)
 shared/                   Shared IPC contracts, locales and optional templates
 src/pages/, src/hooks/    Extracted pages and application data hook
 src/i18n/                  Frontend i18n module (language registry, ZH/EN locale dictionaries & typed keys)

@@ -372,6 +372,8 @@ export async function copyRecords(source, target, records, progress = () => {}) 
   const dirs = records.filter((record) => record.type === 'directory').sort((a, b) => a.path.length - b.path.length);
   for (const record of dirs) await fs.mkdir(path.join(target, record.path), { recursive: true });
   const files = copied.filter((record) => record.type === 'file');
+  const totalBytes = files.reduce((sum, record) => sum + (record.size || 0), 0);
+  let copiedBytes = 0;
   let completed = 0;
   for (const record of files) {
     const dest = path.join(target, record.path);
@@ -390,6 +392,14 @@ export async function copyRecords(source, target, records, progress = () => {}) 
         for await (const chunk of input.createReadStream({ autoClose: false })) {
           hash.update(chunk);
           await output.writeFile(chunk);
+          copiedBytes += chunk.length;
+          progress({
+            phase: 'copying',
+            completed,
+            total: files.length,
+            detail: record.path,
+            percent: totalBytes ? (100 * copiedBytes) / totalBytes : 0,
+          });
         }
       } finally {
         await output.close();
@@ -414,7 +424,13 @@ export async function copyRecords(source, target, records, progress = () => {}) 
     }
     const date = new Date(record.mtimeMs);
     await fs.utimes(dest, date, date);
-    progress({ phase: 'copying', completed: ++completed, total: files.length, detail: record.path });
+    progress({
+      phase: 'copying',
+      completed: ++completed,
+      total: files.length,
+      detail: record.path,
+      percent: totalBytes ? (100 * copiedBytes) / totalBytes : (100 * completed) / files.length,
+    });
   }
   for (const record of dirs.reverse()) {
     const date = new Date(record.mtimeMs);

@@ -537,7 +537,8 @@ await runE2E('interactions', async (harness) => {
   assert.equal((await fs.readdir(exportsDir)).length, 8);
   done('Single-save and restore-point export actions each create their own complete outer folder');
   await dialog.getByRole('button', { name: '恢复', exact: true }).click();
-  await dialog.getByRole('checkbox', { name: '我已关闭游戏，并暂停会写入存档的云同步。', exact: true }).check();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0);
+  await expect(dialog.locator('.restore-warning')).toHaveText('我已关闭游戏，并暂停会写入存档的云同步。');
   await dialog.getByRole('button', { name: '确认读档', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   assert.deepEqual(await fs.readFile(path.join(sourceA, 'saves/progress.dat')), recoveryBytes);

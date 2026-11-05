@@ -61,12 +61,14 @@ export interface AppState {
   recoveryMessages: string[];
   version: string;
   restorePointRetention: RestorePointRetention;
+  logLimitMB: number;
 }
 export interface Progress {
   phase: string;
   detail: string;
   completed: number;
   total?: number;
+  percent?: number;
 }
 export type ImportAction = 'overwrite' | 'skip' | 'keep-both';
 export interface ImportDecision {
@@ -142,6 +144,7 @@ export interface Bridge {
   setTheme(theme: Theme): Promise<void>;
   setLanguage(language: Language): Promise<void>;
   setRestorePointRetention(value: RestorePointRetention): Promise<void>;
+  setLogLimitMB(value: number): Promise<void>;
   saveGame(game: GameInput): Promise<string>;
   removeGame(id: string, undo?: boolean, deleteRecords?: boolean): Promise<void>;
   exportGames(ids: string[], includeSnapshots?: boolean): Promise<(ExportResult & { snapshotCount: number }) | null>;

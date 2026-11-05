@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { assertNoLinks, atomicJson, safeId } from './fs-utils.mjs';
 import { normalizeRetention } from './retention.mjs';
 import { AppError } from './errors.mjs';
+import { validLogLimit } from '../shared/log-settings.mjs';
 
 /** @param {any} value @returns {import('./models').LibraryConfig} */
 export function validateLibrary(value) {
@@ -23,6 +24,7 @@ export function validateLibrary(value) {
     if (game.restorePointRetention !== undefined) normalizeRetention(game.restorePointRetention, true);
   }
   if (value.restorePointRetention !== undefined) normalizeRetention(value.restorePointRetention);
+  if (value.logLimitMB !== undefined && !validLogLimit(value.logLimitMB)) throw new AppError('logs.invalidLimit');
   return value;
 }
 

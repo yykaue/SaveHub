@@ -118,7 +118,7 @@ test('cancel, incomplete or forged decisions and stale library state cannot part
   assert.equal((await store.snapshots(gameId)).length, before.length);
 });
 
-test('protected and trashed conflicts reject overwrite for the whole batch but allow coexistence', async (t) => {
+test('protected conflicts reject overwrite for the whole batch but allow coexistence alongside trash', async (t) => {
   const { store, gameId, legacy, originals, addSource } = await fixture(t, 2);
   await store.updateSnapshot(gameId, originals[0].id, { protected: true });
   await store.updateSnapshot(gameId, originals[1].id, { deleted: true });

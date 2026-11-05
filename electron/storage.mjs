@@ -40,6 +40,8 @@ import {
   reviewGameImport,
 } from './game-transfer.mjs';
 import { Logger } from './logger.mjs';
+import { progressRange } from './progress.mjs';
+import { DEFAULT_LOG_LIMIT_MB, BYTES_PER_MB, validLogLimit } from '../shared/log-settings.mjs';
 import {
   DEFAULT_RETENTION,
   effectiveRetention,
@@ -111,6 +113,7 @@ export class SaveStore {
       theme: 'ink',
       language: DEFAULT_LANGUAGE,
       restorePointRetention: { ...DEFAULT_RETENTION },
+      logLimitMB: DEFAULT_LOG_LIMIT_MB,
     };
     /** @type {import('./models').InternalImportPlan | null} */
     this.pendingImport = null;
@@ -202,6 +205,7 @@ export class SaveStore {
         language: DEFAULT_LANGUAGE,
         games: presets,
         restorePointRetention: { active: this.maxRestorePoints, removed: DEFAULT_RETENTION.removed },
+        logLimitMB: DEFAULT_LOG_LIMIT_MB,
       };
       setBackendLanguage(this.config.language);
       await this.saveConfig();
@@ -211,6 +215,11 @@ export class SaveStore {
       delete this.config.maxRestorePoints;
       await this.saveConfig();
     } else normalizeRetention(this.config.restorePointRetention, false, this.lang);
+    if (this.config.logLimitMB === undefined) {
+      this.config.logLimitMB = DEFAULT_LOG_LIMIT_MB;
+      await this.saveConfig();
+    }
+    await this.logger.setMaxBytes(this.config.logLimitMB * BYTES_PER_MB).catch(() => {});
     await this.recoverTransactions();
     for (const game of this.config.games.filter((game) => game.purgeGamePending || game.purgeSnapshotsPending)) {
       // Older snapshot-only cleanup intents retain their original scope.
@@ -415,6 +424,7 @@ export class SaveStore {
       dataDir: this.dataDir,
       recoveryMessages: this.recoveryMessages,
       restorePointRetention: { ...this.config.restorePointRetention },
+      logLimitMB: this.config.logLimitMB,
     };
   }
 
@@ -435,6 +445,22 @@ export class SaveStore {
         throw error;
       }
       for (const game of this.config.games) if (!game.deletedAt) await this.pruneRestorePoints(game.id);
+    });
+  }
+
+  /** @param {number} value */
+  async setLogLimitMB(value) {
+    return this.exclusive(async () => {
+      if (!validLogLimit(value)) throw this.error('logs.invalidLimit');
+      const previous = this.config;
+      this.config = { ...previous, logLimitMB: value };
+      try {
+        await this.saveConfig();
+      } catch (error) {
+        this.config = previous;
+        throw error;
+      }
+      await this.logger.setMaxBytes(value * BYTES_PER_MB);
     });
   }
 
@@ -634,7 +660,7 @@ export class SaveStore {
     this.assertGameWritable(game.id);
     const source = await inventory(root, entries, {
       allowMissing,
-      progress: this.onProgress,
+      progress: progressRange(this.onProgress, 0, 10),
       lang: this.lang,
       hash: false,
     });
@@ -644,12 +670,27 @@ export class SaveStore {
     const stage = path.join(this.gameDir(game.id), 'snapshots', `.pending-${id}`);
     const destination = this.snapshotDir(game.id, id);
     try {
-      source.records = await copyRecords(root, path.join(stage, 'payload'), source.records, this.onProgress);
+      source.records = await copyRecords(
+        root,
+        path.join(stage, 'payload'),
+        source.records,
+        progressRange(this.onProgress, 10, 70),
+      );
       if (expectedFingerprint && fingerprint(source) !== expectedFingerprint) {
         throw this.error('storage.importSourceChangedAfterConfirm');
       }
-      const copied = await inventory(path.join(stage, 'payload'), entries, { allowMissing: true, lang: this.lang });
-      const sourceAfter = await inventory(root, entries, { allowMissing, lang: this.lang });
+      this.onProgress({ phase: 'checking', detail: label, completed: 0, percent: 70 });
+      const copied = await inventory(path.join(stage, 'payload'), entries, {
+        allowMissing: true,
+        lang: this.lang,
+        progress: progressRange(this.onProgress, 70, 85),
+      });
+      this.onProgress({ phase: 'checking', detail: label, completed: 0, percent: 85 });
+      const sourceAfter = await inventory(root, entries, {
+        allowMissing,
+        lang: this.lang,
+        progress: progressRange(this.onProgress, 85, 95),
+      });
       if (signature(source) !== signature(copied) || signature(source) !== signature(sourceAfter)) {
         throw this.error('storage.backupChangedOrVerifyFailed');
       }
@@ -674,7 +715,15 @@ export class SaveStore {
         ...(origin ? { origin } : {}),
         ...(metadata || {}),
         ...(replace
-          ? { id: replace.id, createdAt: replace.createdAt, favorite: replace.favorite, protected: replace.protected }
+          ? {
+              id: replace.id,
+              createdAt: replace.createdAt,
+              updatedAt: new Date().toISOString(),
+              favorite: replace.favorite,
+              protected: replace.protected,
+              kind: replace.kind,
+              deletedAt: replace.deletedAt,
+            }
           : {}),
       };
       validateManifest(meta, this.lang);
@@ -686,6 +735,7 @@ export class SaveStore {
         await commitSnapshotDirectory(stage, destination);
         this.invalidateSnapshotCache(game.id, id);
       }
+      this.onProgress({ phase: 'copying', detail: label, completed: 1, total: 1, percent: 100 });
       return meta;
     } finally {
       // A pending replacement journal owns its stage until rollback/recovery finishes.

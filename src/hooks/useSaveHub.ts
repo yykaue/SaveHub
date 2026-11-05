@@ -31,7 +31,10 @@ export function useSaveHub(onStart: () => void, onClose: () => void) {
         if (next?.recoveryMessages.length) setToast({ text: next.recoveryMessages.join('\n') });
       })
       .catch((error) => setBootError(error.message));
-    return api?.onProgress(setProgress);
+    return api?.onProgress((next) => {
+      // Keep the last completed progress visible until the result and refreshed state arrive.
+      if (next) setProgress(next);
+    });
   }, [refresh, api]);
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export function useSaveHub(onStart: () => void, onClose: () => void) {
 
   const perform = async <T>(label: string, action: () => Promise<T>, success?: string, close = false) => {
     if (busy) return null;
+    setProgress(null);
     setBusy(label);
     onStart();
     try {

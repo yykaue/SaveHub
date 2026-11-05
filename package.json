@@ -37,6 +37,7 @@
     "check:contracts": "node scripts/generate-preload.mjs --check",
     "test:e2e": "playwright test",
     "test:retention": "node scripts/retention-interactions.mjs",
+    "test:optimizations": "node scripts/optimization-interactions.mjs",
     "checksums": "node scripts/checksums.mjs"
   },
   "devDependencies": {

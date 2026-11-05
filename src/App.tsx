@@ -45,6 +45,7 @@ import { RestoreConfirm } from './modals/RestoreConfirm';
 import { SnapshotForm } from './modals/SnapshotForm';
 import { animate } from './motion';
 import { SettingsPage } from './pages/SettingsPage';
+import { ProgressPanel } from './components/ProgressPanel';
 import {
   BatchReport,
   Game,
@@ -667,6 +668,7 @@ export default function App() {
                   onRetention={(value) =>
                     perform(t('retention.saving'), () => api.setRestorePointRetention(value), t('retention.saved'))
                   }
+                  onLogLimit={(value) => perform(t('logs.saving'), () => api.setLogLimitMB(value), t('logs.saved'))}
                   onRemovedGames={() => {
                     setGamesView((view) => ({ ...view, removed: true, query: '', selectedIds: [] }));
                     setPage('games');
@@ -971,27 +973,7 @@ export default function App() {
           )}
         </Modal>
       )}
-      {busy && (
-        <div className="progress-panel" role="status">
-          <LoaderCircle size={21} className="spin" />
-          <div>
-            <strong>{busy}</strong>
-            <p>{progress?.detail || t('app.preparingProgress')}</p>
-          </div>
-          {progress?.total ? (
-            <span>
-              {progress.completed} / {progress.total}
-            </span>
-          ) : null}
-          <div className="progress-bar">
-            <i
-              style={{
-                width: progress?.total ? `${Math.max(3, (100 * progress.completed) / progress.total)}%` : '35%',
-              }}
-            />
-          </div>
-        </div>
-      )}
+      {busy && <ProgressPanel label={busy} progress={progress} />}
       {toast && (
         <div className={`toast ${toast.error ? 'toast-error' : ''}`} role={toast.error ? 'alert' : 'status'}>
           {toast.error ? <Info size={19} /> : <Check size={19} />}

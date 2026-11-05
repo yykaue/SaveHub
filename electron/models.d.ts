@@ -40,6 +40,7 @@ export interface LibraryConfig {
   theme: Theme;
   language: Language;
   restorePointRetention: RestorePointRetention;
+  logLimitMB: number;
   maxRestorePoints?: number;
 }
 export interface RestoreJournal {
