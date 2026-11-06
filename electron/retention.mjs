@@ -59,8 +59,8 @@ export function oldestFirst(a, b) {
 }
 
 /**
- * Called only under the store write lock, after transactions have finished.
- * Automatic moves preserve updatedAt: queue maintenance is not a user edit.
+ * 仅在持有存储互斥写锁、且事务提交完成后调用。
+ * 自动移入已移除队列时保留原 updatedAt（队列自动轮转不属于用户主动编辑）。
  * @param {import('./storage.mjs').SaveStore} store
  * @param {string} gameId
  */
@@ -80,7 +80,7 @@ export async function pruneRestorePoints(store, gameId) {
     movedCount++;
     await store.logger.info('prune-moved', { operation: 'prune', gameId, id: item.id });
   }
-  // Retry persisted intents even when this queue is now below its limit.
+  // 即使当前已移除队列总数未超限，仍需继续重试此前已持久化但未完成的物理删除意图（purgePending）。
   const pending = removed.filter((meta) => meta.purgePending);
   const candidates = removed.filter((meta) => !meta.purgePending).sort(oldestFirst);
   const excess = candidates.slice(0, Math.max(0, candidates.length - Math.max(0, limits.removed - pending.length)));

@@ -40,6 +40,10 @@ const recordSummary = (game: Game) =>
     size: formatBytes(records(game).reduce((total, save) => total + save.bytes, 0)),
   });
 
+/**
+ * 全部游戏总览页面组件：
+ * 支持卡片/列表双视图切换、活跃/已移除标签页过滤、关键词搜索、批量勾选导出及分页展示。
+ */
 export function AllGames({
   games,
   platform,

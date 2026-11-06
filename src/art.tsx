@@ -2,6 +2,7 @@ import { Circle, Flame, Gamepad2, Gem, Ghost, Rocket, Swords, TowerControl } fro
 import { useId } from 'react';
 import logoUrl from '../build/icon.svg';
 
+/** 应用品牌图标组件 */
 export function Logo({ small = false }: { small?: boolean }) {
   return (
     <img
@@ -16,6 +17,7 @@ export function Logo({ small = false }: { small?: boolean }) {
   );
 }
 
+/** 游戏图标渲染组件：支持自定义 Base64 / savehub-icon:// 协议图片或内置 Lucide 矢量图标 */
 export function GameGlyph({ icon, size = 23 }: { icon: string; size?: number }) {
   if (icon.startsWith('data:image/') || icon.startsWith('savehub-icon://'))
     return <img src={icon} alt="" className="custom-icon" width={size} height={size} loading="lazy" />;
@@ -35,6 +37,7 @@ export function GameGlyph({ icon, size = 23 }: { icon: string; size?: number }) 
   return <Icon size={size} strokeWidth={1.5} />;
 }
 
+/** 详情页顶部主题风景插画 SVG 组件 */
 export function Landscape({ kind = 'ring', className = '' }: { kind?: string; className?: string }) {
   const unique = useId().replaceAll(':', '');
   return (

@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
+// 发行产物审计脚本：逐文件比对打包后 app.asar 内容与源码 SHA-256，并复核 SHA256SUMS.txt 签名清单
 const require = createRequire(import.meta.url);
 const builderRequire = createRequire(require.resolve('electron-builder'));
 const appBuilderRequire = createRequire(builderRequire.resolve('app-builder-lib'));
@@ -24,7 +25,7 @@ async function walk(directory) {
   for (const item of await fs.readdir(directory, { withFileTypes: true })) {
     const file = path.join(directory, item.name);
     if (item.isDirectory()) await walk(file);
-    else if (!file.endsWith('.d.ts')) files.push(file.replaceAll(path.sep, '/')); // Builder excludes compile-time declarations.
+    else if (!file.endsWith('.d.ts')) files.push(file.replaceAll(path.sep, '/')); // electron-builder 打包时会自动排除编译期 .d.ts 声明文件
   }
 }
 await walk('electron');

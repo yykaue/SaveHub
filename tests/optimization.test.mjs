@@ -1,3 +1,7 @@
+/**
+ * 性能与体验优化专项测试套件：
+ * 覆盖流式进度上报、摘要缓存复用、无保护冲突覆盖、IPC 参数白名单与分级日志等场景。
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';

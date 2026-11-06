@@ -18,12 +18,21 @@ import {
 
 import { recoverJournals, validateRestoreJournal } from './recovery.mjs';
 
+/**
+ * 暂存区签名（仅比对路径、类型与字节大小，不包含 mtimeMs）。
+ * 因为 copyRecords 通过 fs.utimes 恢复时间戳时可能丢失亚毫秒精度（如 APFS），
+ * 暂存区与快照 manifest 的预检不应因时间戳亚毫秒截断而误报失败。
+ */
 const stageSignature = (/** @type {{ absent: string[]; records: any[] }} */ value) =>
   JSON.stringify({
     absent: value.absent,
     records: value.records.map(({ path: file, type, size }) => ({ path: file, type, size })),
   });
 
+/**
+ * 元数据签名（包含路径、类型、字节大小与 mtimeMs）。
+ * 用于快速比对安全备份后实时游戏目录是否在准备阶段被外部进程修改，避免重复计算全量 SHA-256。
+ */
 const metadataSignature = (/** @type {{ absent: string[]; records: any[] }} */ value) =>
   JSON.stringify({
     absent: value.absent,
@@ -31,11 +40,18 @@ const metadataSignature = (/** @type {{ absent: string[]; records: any[] }} */ v
   });
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} gameId
-   * @param {string} id
-    */
+ * 事务性恢复存档快照：
+ * 1. 校验目标快照完整性与配置项一致性，并预估游戏目录与存储库的磁盘空间预算。
+ * 2. 自动为当前实时存档创建 safety 恢复点备份。
+ * 3. 将目标快照复制到游戏目录下的隐藏暂存区 `.savehub-restore-<txId>/next` 并校验元数据签名。
+ * 4. 持久化事务日志（status = 'applying'），按条目将原文件移入 `previous`、新文件移入目标位置，每步更新日志。
+ * 5. 对恢复后的实时存档执行全量 SHA-256 签名校验，通过后标记 `committed` 并清理暂存区与事务日志。
+ * 6. 若提交前任意步骤失败，则基于事务日志逆序回滚；若回滚也失败，则将该游戏加入 `blockedGames` 熔断名单。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {string} id 待恢复的快照 ID
+ */
 export async function restoreSnapshot(store, gameId, id) {
   return store.exclusive(async () => {
     const game = store.game(gameId);
@@ -46,6 +62,7 @@ export async function restoreSnapshot(store, gameId, id) {
     if (!equal([...entries].sort(), [...meta.entries].sort())) {
       throw store.error('storage.restoreEntriesMismatch');
     }
+    // 先仅扫描文件大小，避免与后续 safety 备份重复做全量哈希计算
     const currentSize = await inventory(root, entries, { allowMissing: true, hash: false, lang: store.lang });
     await assertDiskBudgets(
       [
@@ -65,8 +82,7 @@ export async function restoreSnapshot(store, gameId, id) {
     const transactionId = randomUUID();
     const stage = path.join(root, `.savehub-restore-${transactionId}`);
     const journalFile = path.join(store.dataDir, 'transactions', `${transactionId}.json`);
-    /**
-     * @type {import('./models').RestoreJournal} */
+    /** @type {import('./models').RestoreJournal} */
     const journal = {
       version: 1,
       id: transactionId,
@@ -135,12 +151,12 @@ export async function restoreSnapshot(store, gameId, id) {
       journal.status = 'committed';
       await atomicJson(journalFile, journal);
       committed = true;
-      // Once committed, cleanup failures must not turn a successful restore into a rollback.
+      // 一旦事务标记为 committed，后续清理失败绝不能触发回滚而破坏已成功恢复的存档
       try {
         await fs.rm(stage, { recursive: true, force: true });
         await fs.rm(journalFile, { force: true });
       } catch (cleanupError) {
-        /* Retain committed journal so the next startup can finish cleanup. */
+        // 保留已提交的事务日志，交由下次启动时的 recoverTransactions 完成残留清理
         await store.logger.warn('restore-stage-cleanup-deferred', {
           transactionId,
           error: /** @type {Error} */ (cleanupError).message,
@@ -152,6 +168,7 @@ export async function restoreSnapshot(store, gameId, id) {
     } catch (error) {
       const errMessage = /** @type {Error} */ (error).message;
       if (committed) {
+        // 提交后的非核心维护操作（如 pruneRestorePoints）报错仅记录告警，不影响读档成功结果
         await store.logger.warn('restore-post-commit-maintenance-failed', {
           gameId,
           snapshotId: id,
@@ -187,11 +204,13 @@ export async function restoreSnapshot(store, gameId, id) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
-   * @param {import('./models').RestoreJournal} journal
-   * @param {string} journalFile
-    */
+ * 逆序回滚未提交的恢复事务，将 `stage/previous` 中的原存档还原回游戏目录，
+ * 并将损坏或半写入的目标文件隔离至 `stage/failed` 供排查。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {import('./models').RestoreJournal} journal 恢复事务日志对象
+ * @param {string} journalFile 事务日志文件路径
+ */
 export async function rollback(store, journal, journalFile) {
   validateRestoreJournal(store, journal, journalFile);
   safeId(journal.id, store.lang);
@@ -233,13 +252,17 @@ export async function rollback(store, journal, journalFile) {
   }
   journal.status = 'rolled-back';
   await atomicJson(journalFile, journal);
-  // Keep the failed payload and journal for diagnosis; the original game files are restored.
+  // 保留失败的暂存负载与事务日志以便故障诊断，原始游戏存档此时已安全还原
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * */
+ * 启动时扫描并恢复所有未完成的读档事务日志：
+ * - 已回滚（rolled-back）：跳过，保留日志现场；
+ * - 已提交（committed）：完成残留暂存目录与日志文件的清理；
+ * - 未完成（preparing / applying）：执行逆序回滚并向前端推送恢复通知。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ */
 export async function recoverTransactions(store) {
   await recoverJournals(
     store,

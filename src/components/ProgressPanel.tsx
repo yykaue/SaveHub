@@ -2,6 +2,9 @@ import { LoaderCircle } from 'lucide-react';
 import { t } from '../i18n';
 import type { Progress } from '../types';
 
+/**
+ * 底部浮动任务进度面板组件：实时展示主进程文件复制、校验、导入、导出或读档阶段与百分比进度。
+ */
 export function ProgressPanel({ label, progress }: { label: string; progress: Progress | null }) {
   const value = progress?.percent ?? (progress?.total ? (100 * progress.completed) / progress.total : undefined);
   const percent = value === undefined ? undefined : Math.floor(Math.max(0, Math.min(100, value)));

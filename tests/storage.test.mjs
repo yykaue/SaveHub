@@ -1,3 +1,7 @@
+/**
+ * 核心存储引擎（SaveStore）单元测试套件：
+ * 覆盖快照创建、校验、事务性恢复、回收站管理、导出打包、旧版导入及启动恢复等核心能力。
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -139,7 +143,7 @@ test('legacy automatic backups remain readable and are separate from user snapsh
   const { safetyId } = await store.restoreSnapshot(id, snapshot.id);
   for (const snapshotId of [snapshot.id, safetyId]) {
     const meta = await store.readSnapshot(id, snapshotId);
-    delete meta.protected; // Simulate manifests written before the protection label existed.
+    delete meta.protected; // 模拟在引入保护标记字段之前写入的旧版清单文件。
     await atomicJson(path.join(store.snapshotDir(id, snapshotId), 'manifest.json'), meta);
   }
   const reopened = await new SaveStore(store.dataDir).init();
@@ -248,7 +252,7 @@ test('permanent deletion preflights all records and refuses active, protected, d
     active = await save(store, id, '仍在使用'),
     protectedSave = await save(store, id, '保护');
   await store.updateSnapshots(id, [trash.id, protectedSave.id], { deleted: true });
-  // Simulate a protected trash record created by an older version.
+  // 模拟由旧版本创建的、处于回收站中但仍带有保护标记的历史记录。
   await atomicJson(path.join(store.snapshotDir(id, protectedSave.id), 'manifest.json'), {
     ...(await store.readSnapshot(id, protectedSave.id)),
     protected: true,
@@ -728,7 +732,7 @@ test('previous unwrapped named exports still import from their root and individu
   const destination = path.join(base, 'exports');
   await fs.mkdir(destination);
   const bundle = await store.exportSnapshot(id, snapshot.id, destination);
-  // Reproduce the previous layout with the named folder and index at the chosen root.
+  // 复现旧版无外层包裹目录的平铺导出布局（命名目录与索引直接位于目标根目录下）。
   for (const child of await fs.readdir(bundle))
     await fs.rename(path.join(bundle, child), path.join(destination, child));
   await fs.rmdir(bundle);

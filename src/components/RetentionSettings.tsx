@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { t } from '../i18n';
 import type { RestorePointRetention } from '../types';
 
+/** 恢复点保留策略表单草稿类型（`null` 表示继承全局默认配置） */
 export type RetentionDraft = { active: string | null; removed: string | null };
+
+/** 将后端保留策略对象转换为表单字符串草稿 */
 export const retentionDraft = (value: Partial<RestorePointRetention>): RetentionDraft => ({
   active: value.active === undefined ? null : String(value.active),
   removed: value.removed === undefined ? null : String(value.removed),
 });
 
+/** 校验表单草稿并解析为合法的数值型保留策略对象 */
 export function retentionValues(draft: RetentionDraft): Partial<RestorePointRetention> {
   const result: Partial<RestorePointRetention> = {};
   for (const key of ['active', 'removed'] as const) {
@@ -19,6 +23,7 @@ export function retentionValues(draft: RetentionDraft): Partial<RestorePointRete
   return result;
 }
 
+/** 恢复点保留策略字段组（支持全局配置与单游戏继承覆写两种模式） */
 export function RetentionFields({
   value,
   onChange,

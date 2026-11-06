@@ -25,10 +25,11 @@ import { progressTask } from './progress.mjs';
 import { namedExportCandidates } from './snapshot-export.mjs';
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {any} journal
-    */
+ * 根据导入覆盖替换事务日志计算目标快照目录、暂存目录、备份目录与日志文件路径。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {any} journal 导入替换事务日志
+ */
 export function importReplacementPaths(store, journal) {
   if (
     !journal ||
@@ -51,10 +52,13 @@ export function importReplacementPaths(store, journal) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {any} journal
-    */
+ * 完成或回滚导入覆盖替换事务：
+ * - 若状态仍为 `prepared` 且存在 `.replaced-<token>` 备份，则将原快照目录恢复回 `target`；
+ * - 确认 `target` 存在后，清理 `.pending-<token>`、`.replaced-<token>` 及事务日志文件，并失效对应缓存。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {any} journal 导入替换事务日志
+ */
 export async function finishImportReplacement(store, journal) {
   const { target, stage, previous, file } = importReplacementPaths(store, journal);
   for (const location of [target, stage, previous, file]) await assertNoLinks(location, store.lang);
@@ -75,13 +79,17 @@ export async function finishImportReplacement(store, journal) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} gameId
-   * @param {import('./models').Manifest} original
-   * @param {string} stage
-   * @param {string} token
-    */
+ * 事务性替换已有快照（用于导入冲突时选择 `overwrite`）：
+ * 1. 校验原快照未被并发修改且未处于受保护或待清除状态。
+ * 2. 写入 `prepared` 事务日志，将原快照目录移至 `.replaced-<token>`，再将 `.pending-<token>` 移至目标位置。
+ * 3. 更新日志为 `committed` 并清理备份目录；若中途失败则调用 `finishImportReplacement` 自动还原原快照。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {import('./models').Manifest} original 准备替换的目标快照清单
+ * @param {string} stage 已写入新快照数据的 `.pending-<token>` 目录
+ * @param {string} token 事务唯一标识
+ */
 export async function replaceImportedSnapshot(store, gameId, original, stage, token) {
   const current = await store.readSnapshot(gameId, original.id);
   if (!equal(current, original)) {
@@ -104,9 +112,7 @@ export async function replaceImportedSnapshot(store, gameId, original, stage, to
     await store.fault('after-import-install', { gameId, id: original.id });
     await atomicJson(locations.file, { ...journal, status: 'committed' });
   } catch (error) {
-    const errMessage =
-      /**
-       * @type {Error} */ (error).message;
+    const errMessage = /** @type {Error} */ (error).message;
     try {
       await store.finishImportReplacement(journal);
     } catch (rollbackError) {
@@ -121,8 +127,7 @@ export async function replaceImportedSnapshot(store, gameId, original, stage, to
     }
     throw store.error('storage.importReplaceAborted', { error: errMessage });
   }
-  // Once committed, cleanup failure must not misreport the successful replacement.
-  // The persisted journal lets startup finish removing the previous copy.
+  // 一旦事务标记为 committed，清理失败不应影响替换成功的结果；残留日志会在下次启动时继续清理
   await store
     .finishImportReplacement({ ...journal, status: 'committed' })
     .catch((err) =>
@@ -131,7 +136,9 @@ export async function replaceImportedSnapshot(store, gameId, original, stage, to
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
+ * 启动时扫描并恢复未完成的导入覆盖替换事务日志。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
  */
 export async function recoverImportReplacements(store) {
   await recoverJournals(
@@ -162,18 +169,16 @@ export async function recoverImportReplacements(store) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
-   * @param {any} candidate
-   * @param {any[]} snapshots
-    */
+ * 查找现有快照列表中与待导入候选项冲突（同源路径或同导出快照 ID）的快照。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {any} candidate 待导入候选条目
+ * @param {any[]} snapshots 当前游戏已有快照列表
+ */
 export function importMatches(store, candidate, snapshots) {
-  const key = (
-    /**
-     * @type {string} */ value,
-  ) => (store.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value));
-  // An imported directory identifies a save even when its contents have changed.
-  // Equal contents in distinct source directories may be intentional checkpoints.
+  const key = (/** @type {string} */ value) =>
+    store.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  // 导入源目录路径唯一标识一个存档来源（即使内容已更新）；而不同源目录中相同内容可能是用户有意保留的检查点
   return snapshots.filter(
     (snapshot) =>
       (snapshot.origin?.path && key(snapshot.origin.path) === key(candidate.source)) ||
@@ -185,11 +190,12 @@ export function importMatches(store, candidate, snapshots) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
-   * @param {string} gameId
-   * @param {string} directory
-    */
+ * 扫描指定目录并生成前端可见的快照导入计划。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {string} directory 待扫描的导入源目录
+ */
 export async function prepareImport(store, gameId, directory) {
   return store.exclusive(async () => {
     const plan = await store.prepareImportPlan(gameId, directory);
@@ -211,21 +217,27 @@ export async function prepareImport(store, gameId, directory) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
-   * @param {string} planId
-    */
+ * 取消挂起的快照导入计划。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} planId 导入计划 ID
+ */
 export function cancelImport(store, planId) {
   if (store.pendingImport?.id === planId) store.pendingImport = null;
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} gameId
-   * @param {string} directory
-   * @param {{ game?: import('./models').StoredGame; bundle?: boolean }} [options]
-    */
+ * 内部快照导入计划构建逻辑，支持识别 4 种目录结构：
+ * 1. v2 命名导出包（包含 `.savehub-exports/*.json`）；
+ * 2. v1 批量导出包（包含 `collection.json` 与 `SaveHub-<id>` 子目录）；
+ * 3. v1 单快照导出目录（包含 `manifest.json` 与 `payload/`）；
+ * 4. 传统备份目录（包含 `ArchiveFile*` 子目录或直接作为存档根目录）。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {string} directory 导入源目录
+ * @param {{ game?: import('./models').StoredGame; bundle?: boolean }} [options] 选项（bundle=true 表示隶属于游戏整包导入）
+ */
 export async function prepareImportPlan(store, gameId, directory, { game = store.game(gameId), bundle = false } = {}) {
   if (!bundle) {
     store.assertGameWritable(game.id);
@@ -245,8 +257,7 @@ export async function prepareImportPlan(store, gameId, directory, { game = store
   }
   const manifestFile = path.join(directory, 'manifest.json');
   const collectionFile = path.join(directory, 'collection.json');
-  /**
-   * @type {import('./models').InternalImportPlan} */
+  /** @type {import('./models').InternalImportPlan} */
   const plan = { id: randomUUID(), gameId, entries, directory, items: [], failed: [], bundle };
   const existing = await store.snapshots(gameId, true);
   /** @type {any[]} */
@@ -344,30 +355,32 @@ export async function prepareImportPlan(store, gameId, directory, { game = store
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
-   * @param {string} planId
-   * @param {import('../shared/contracts').ImportDecision[]} decisions
-    */
+ * 在互斥锁保护下执行已准备好的快照导入计划。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} planId 导入计划 ID
+ * @param {import('../shared/contracts').ImportDecision[]} decisions 冲突处理决策列表
+ */
 export async function executeImport(store, planId, decisions) {
   return store.exclusive(() => store.executeImportPlan(planId, decisions));
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} planId
-   * @param {import('../shared/contracts').ImportDecision[]} decisions
-    */
+ * 校验并执行挂起的快照导入计划，全部导入完成后统一执行恢复点保留策略清理。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} planId 导入计划 ID
+ * @param {import('../shared/contracts').ImportDecision[]} decisions 冲突处理决策列表
+ */
 export async function executeImportPlan(store, planId, decisions) {
   const plan = store.pendingImport;
   if (!plan || plan.id !== planId) throw store.error('storage.importPlanExpired');
   const game = store.game(plan.gameId);
   store.assertGameWritable(game.id);
   const choices = await validateImportPlan(store, plan, decisions);
-  store.pendingImport = null; // An execution token is single use, including partial failure.
+  store.pendingImport = null; // 导入计划令牌为一次性消费，即使中途部分失败也不可重放
   const report = await progressTask(store, 'importing', '', 0, 95, () => applyImportPlan(store, plan, choices, game));
-  // Enforce both queues only after every import/overwrite/skip has finished.
+  // 仅在批次内所有导入/覆盖/跳过操作全部完成后，才统一执行恢复点与回收站保留策略清理
   const pruned = await progressTask(store, 'pruning', '', 95, 100, () => store.pruneRestorePoints(game.id));
   if (pruned && (pruned.movedCount || pruned.purgedCount)) {
     report.pruned = pruned;
@@ -376,11 +389,12 @@ export async function executeImportPlan(store, planId, decisions) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {import('./models').InternalImportPlan} plan
-   * @param {import('../shared/contracts').ImportDecision[]} decisions
-    */
+ * 校验用户提交的冲突决策是否完整、目标快照是否合法，并复核库内冲突匹配集合是否发生并发变动。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {import('./models').InternalImportPlan} plan 内部导入计划
+ * @param {import('../shared/contracts').ImportDecision[]} decisions 冲突处理决策列表
+ */
 export async function validateImportPlan(store, plan, decisions) {
   if (
     !plan.bundle &&
@@ -414,7 +428,7 @@ export async function validateImportPlan(store, plan, decisions) {
     }
     choices.set(item.id, decision);
   }
-  // Reject stale library decisions before committing any item in the batch.
+  // 在提交批次中的任何条目之前，重新扫描库内快照以拒绝基于过期冲突列表做出的决策
   store.invalidateGameCache(plan.gameId);
   const existing = await store.snapshots(plan.gameId, true);
   for (const item of plan.items) {
@@ -426,16 +440,16 @@ export async function validateImportPlan(store, plan, decisions) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
-   * @param {import('./models').InternalImportPlan} plan
-   * @param {import('./models').ImportChoices} choices
-   * @param {import('./models').StoredGame} game
-    */
+ * 按冲突处理决策逐条执行快照捕获（新增、覆盖替换或自动重命名保留两者）。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {import('./models').InternalImportPlan} plan 内部导入计划
+ * @param {import('./models').ImportChoices} choices 决策映射表
+ * @param {import('./models').StoredGame} game 目标游戏对象
+ */
 export async function applyImportPlan(store, plan, choices, game) {
   const existing = await store.snapshots(game.id, true);
-  /**
-   * @type {import('../shared/contracts').ImportReport} */
+  /** @type {import('../shared/contracts').ImportReport} */
   const report = { imported: [], overwritten: [], keptBoth: [], skipped: [], failed: [...plan.failed] };
   const names = new Set([
     ...existing.map((item) => foldedName(item.label)),
@@ -518,11 +532,12 @@ export async function applyImportPlan(store, plan, choices, game) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
-   * @param {string} gameId
-   * @param {string} directory
-    */
+ * 快捷导入传统备份目录（对所有已存在的冲突项自动采用 `skip` 策略）。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {string} directory 传统备份目录路径
+ */
 export async function importLegacy(store, gameId, directory) {
   return store.exclusive(async () => {
     const plan = await store.prepareImportPlan(gameId, directory);

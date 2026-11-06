@@ -6,8 +6,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { SaveStore, atomicJson, within } from '../electron/storage.mjs';
 
-// The NSIS launcher does not forward Electron's debugger output to Playwright.
-// Attach through Chromium's DevToolsActivePort file after the launcher extracts.
+// NSIS 便携版启动器不会直接向 Playwright 转发 Electron 调试输出；
+// 因此等待启动器解压运行后，通过 Chromium 生成的 DevToolsActivePort 文件建立 CDP 连接。
 const root = path.resolve('.test-data');
 await fs.mkdir(root, { recursive: true });
 const reused = process.env.SAVEHUB_PORTABLE_TEST_DATA;

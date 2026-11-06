@@ -1,19 +1,19 @@
 import { validLogLimit } from './log-settings.mjs';
-/** Runtime checks complement the shared compile-time contract before any handler runs. */
+/** 在进入任何 IPC 业务处理器前执行运行时入参校验，与编译期类型契约形成双重防護。 */
 /** @typedef {(value: unknown) => boolean} Validator */
-/** @type {Validator} */
+/** 校验安全标识符（仅允许小写字母、数字与连字符，防止路径穿越） @type {Validator} */
 const id = (value) => typeof value === 'string' && /^[a-z0-9-]{1,64}$/.test(value);
 /** @type {Validator} */
 const bool = (value) => typeof value === 'boolean';
 /** @type {Validator} */
 const str = (value) => typeof value === 'string';
-/** @type {Validator} */
+/** 校验非空普通对象（排除 null 与数组） @type {Validator} */
 const object = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-/** @type {Validator} */
+/** 校验非负安全整数 @type {Validator} */
 const count = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 /** @param {Validator} check @returns {Validator} */
 const optional = (check) => (value) => value === undefined || check(value);
-/** @param {Validator} check @returns {Validator} */
+/** 校验有界数组（上限 10000 项，防止超大数组耗尽内存） @param {Validator} check @returns {Validator} */
 const list = (check) => (value) => Array.isArray(value) && value.length <= 10000 && value.every(check);
 /** @type {Validator} */
 const ids = (value) => list(id)(value) && /** @type {unknown[]} */ (value).length > 0;
@@ -21,18 +21,18 @@ const ids = (value) => list(id)(value) && /** @type {unknown[]} */ (value).lengt
 const oneOf = (values) => (value) => typeof value === 'string' && values.includes(value);
 /** @type {Validator} */
 const selection = (value) => value === 'all' || ids(value);
-/** @type {Validator} */
+/** 校验单平台存档目录配置 @type {Validator} */
 const platformLocation = (value) =>
   object(value) &&
   str(/** @type {{ root?: unknown }} */ (value).root) &&
   list(str)(/** @type {{ items?: unknown }} */ (value).items);
-/** @type {Validator} */
+/** 校验游戏级恢复点保留策略覆盖项（允许省略字段以继承全局默认值） @type {Validator} */
 const partialRetention = (value) =>
   object(value) &&
   Object.entries(/** @type {Record<string, unknown>} */ (value)).every(
     ([key, item]) => ['active', 'removed'].includes(key) && optional(count)(item),
   );
-/** @type {Validator} */
+/** 校验创建或更新游戏时的完整配置入参 @type {Validator} */
 const gameInput = (value) => {
   if (!object(value)) return false;
   const item = /** @type {Record<string, unknown>} */ (value);
@@ -50,14 +50,14 @@ const gameInput = (value) => {
     platformLocation(locations.darwin)
   );
 };
-/** @type {Validator} */
+/** 校验新建存档入参（仅允许名称与备注，禁止在创建时注入受保护或已删除状态） @type {Validator} */
 const snapshotInput = (value) => {
   if (!object(value)) return false;
   return Object.entries(/** @type {Record<string, unknown>} */ (value)).every(
     ([key, item]) => ['label', 'note'].includes(key) && str(item),
   );
 };
-/** @type {Validator} */
+/** 校验单条存档元数据更新入参 @type {Validator} */
 const details = (value) => {
   if (!object(value)) return false;
   return Object.entries(/** @type {Record<string, unknown>} */ (value)).every(([key, item]) =>
@@ -66,14 +66,14 @@ const details = (value) => {
       : ['favorite', 'protected', 'deleted'].includes(key) && bool(item),
   );
 };
-/** @type {Validator} */
+/** 校验批量更新存档状态入参（仅允许批量修改保护标记或软删除标记） @type {Validator} */
 const batchDetails = (value) => {
   if (!object(value)) return false;
   return Object.entries(/** @type {Record<string, unknown>} */ (value)).every(
     ([key, item]) => ['protected', 'deleted'].includes(key) && bool(item),
   );
 };
-/** @type {Validator} */
+/** 校验导入冲突决策项 @type {Validator} */
 const decision = (value) => {
   if (!object(value)) return false;
   const item = /** @type {Record<string, unknown>} */ (value);

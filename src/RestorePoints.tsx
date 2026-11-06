@@ -6,6 +6,10 @@ import type { Snapshot, RestorePointRetention } from './types';
 
 export type PointSelection = { active: string[]; removed: string[] };
 
+/**
+ * 自动安全恢复点管理对话框组件：
+ * 分为“可用恢复点”与“已移除的恢复点”两个独立队列，支持按保留上限校验的批量恢复、导出、移除与永久删除。
+ */
 export function RestorePoints({
   points,
   selection,

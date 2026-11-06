@@ -1,6 +1,6 @@
 /**
- * Map nested file/record progress into one monotonically increasing batch percentage.
- * Unknown totals keep the current percentage while still showing the current file.
+ * 将嵌套的文件/记录子进度映射为单调递增的批次总百分比。
+ * 当子任务缺少 total 时保持当前百分比不变，同时继续透传当前正在处理的文件名详情。
  * @param {(progress: import('../shared/contracts').Progress | null) => void} report
  * @param {number} start
  * @param {number} end
@@ -17,10 +17,10 @@ export function progressRange(report, start, end, prefix = '') {
 }
 
 /**
- * Scopes compose across game bundles, snapshots and file copies under the store write lock.
+ * 在存储引擎互斥写锁下组合游戏整包、快照与文件复制的多级进度区间，并在退出时恢复上层进度回调。
  * @template T
  * @param {import('./storage.mjs').SaveStore} store
- * @param {string} phase
+ * @param {import('../shared/contracts').ProgressPhase} phase
  * @param {string} detail
  * @param {number} start
  * @param {number} end

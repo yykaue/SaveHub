@@ -5,6 +5,9 @@ import { SnapshotList } from '../SnapshotList';
 import { dateLabel, formatBytes, gameName, kindLabel } from '../format';
 import { t } from '../i18n';
 import type { Game, Platform, Snapshot } from '../types';
+/**
+ * 当前选中游戏的主存档库页面：展示游戏横幅状态、统计概览卡片与快照管理列表。
+ */
 export function LibraryPage({
   current,
   games,

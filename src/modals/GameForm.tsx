@@ -11,6 +11,10 @@ import templates from '../../shared/game-templates.json';
 const icons = ['ring', 'spire', 'flame', 'gamepad', 'swords', 'gem', 'ghost', 'rocket'] as const;
 const colors = ['#8a9270', '#729486', '#a28167', '#738fb1', '#ab80ae', '#be7976'];
 
+/**
+ * 添加/编辑游戏配置表单组件：
+ * 支持预设模板快速填充、自定义图标上传、双平台（Windows / macOS）存档路径与备份条目配置及单游戏恢复点保留策略覆写。
+ */
 export function GameForm({
   game,
   platform,

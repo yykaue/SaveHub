@@ -49,6 +49,9 @@ const getFilterLabels = (): Record<Filter, string> => ({
   trash: t('snapshots.filterTrash'),
 });
 
+/**
+ * 判断快照是否匹配当前筛选标签页（自动排除 `safety` 类型的恢复点）。
+ */
 export function matchesFilter(snapshot: Snapshot, filter: Filter) {
   if (snapshot.kind === 'safety') return false;
   if (filter === 'trash') return Boolean(snapshot.deletedAt);
@@ -58,6 +61,10 @@ export function matchesFilter(snapshot: Snapshot, filter: Filter) {
   return true;
 }
 
+/**
+ * 游戏存档快照主列表组件：
+ * 支持标签页筛选（全部/收藏/受保护/回收站）、关键词搜索、多列排序、跨页批量选择、批量保护/导出/删除/恢复及单行操作菜单。
+ */
 export function SnapshotList({
   game,
   view,
@@ -297,9 +304,9 @@ export function SnapshotList({
               {t('snapshots.batchSelectedPrefix')}
               <strong>{selected.length}</strong>
               {t('snapshots.batchSelectedSuffix')}
-              {pagination.pages > 1 &&
+              {pagination.total > 1 &&
                 selected.length > pagination.items.filter((item) => view.selectedIds.includes(item.id)).length &&
-                t('snapshots.batchCrossPageHint', { pages: pagination.pages })}
+                t('snapshots.batchCrossPageHint', { pages: pagination.total })}
               {selectedProtected > 0 &&
                 (filter === 'trash' ? t('snapshots.batchProtectedTrashHint') : t('snapshots.batchProtectedHint'))}
             </>
@@ -588,6 +595,9 @@ export function SnapshotList({
   );
 }
 
+/**
+ * 支持半选（indeterminate）状态的无障碍复选框组件。
+ */
 export function SelectionCheckbox({
   checked,
   mixed = false,

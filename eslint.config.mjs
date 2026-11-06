@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
+// ESLint 扁平化规则配置（覆盖前端 TS/TSX、Electron 主进程 MJS/CJS 及脚本测试）
 export default [
   { ignores: ['node_modules/**', 'dist/**', 'release/**', '.test-data/**', 'docs/screenshots/**'] },
   {
@@ -12,9 +13,9 @@ export default [
     plugins: { '@typescript-eslint': tseslint.plugin },
     rules: {
       ...js.configs.recommended.rules,
-      'no-undef': 'off', // TypeScript/checkJs checks names in typed source and the preload.
+      'no-undef': 'off', // 由 TypeScript / checkJs 负责类型化源码与 preload 的全局标识符检查
       'no-unused-vars': 'off',
-      'no-control-regex': 'off', // Filesystem path validation deliberately rejects control bytes.
+      'no-control-regex': 'off', // 文件系统路径安全校验需要主动匹配并拒绝控制字符
       'no-empty': ['error', { allowEmptyCatch: true }],
       '@typescript-eslint/no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_' }],
       'no-constant-binary-expression': 'error',

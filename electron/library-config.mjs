@@ -5,7 +5,7 @@ import { normalizeRetention } from './retention.mjs';
 import { AppError } from './errors.mjs';
 import { validLogLimit } from '../shared/log-settings.mjs';
 
-/** @param {any} value @returns {import('./models').LibraryConfig} */
+/** 校验 library.json 的结构、游戏 ID 唯一性、双平台路径结构及保留策略与日志上限配置 @param {any} value @returns {import('./models').LibraryConfig} */
 export function validateLibrary(value) {
   if (!value || value.version !== 1 || !Array.isArray(value.games)) throw new AppError('storage.invalidConfigFormat');
   const ids = new Set();
@@ -28,13 +28,13 @@ export function validateLibrary(value) {
   return value;
 }
 
-/** @param {string} file */
+/** 读取并校验 library.json 配置文件 @param {string} file */
 export async function readLibrary(file) {
   await assertNoLinks(file);
   return validateLibrary(JSON.parse(await fs.readFile(file, 'utf8')));
 }
 
-/** Explicit startup recovery, never silently replaces a damaged library. @param {string} file */
+/** 显式启动配置恢复：先将损坏的 library.json 备份留证，再用上一版 .previous 覆盖恢复，绝不静默丢弃损坏配置。 @param {string} file */
 export async function recoverPreviousLibrary(file) {
   const previous = await readLibrary(`${file}.previous`);
   await assertNoLinks(file);

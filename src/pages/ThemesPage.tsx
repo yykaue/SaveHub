@@ -1,6 +1,7 @@
 import { Check, Sparkles } from 'lucide-react';
 import { t } from '../i18n';
 import type { Theme } from '../types';
+/** 获取所有可用视觉主题的本地化描述元数据 */
 export const getThemes = (): { id: Theme; name: string; english: string; caption: string; description: string }[] => [
   {
     id: 'ink',

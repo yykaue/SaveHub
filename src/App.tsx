@@ -80,6 +80,10 @@ type ModalState =
   | { type: 'import-report'; report: ImportReport }
   | { type: 'help' };
 
+/**
+ * 应用顶层根组件：
+ * 统筹侧边栏导航、工作区路由（全部游戏 / 存档库 / 主题 / 设置）、全量模态框状态机及跨组件事务编排。
+ */
 export default function App() {
   const [page, setPageState] = useState<Page>('games');
   const [gamesView, setGamesView] = useState<GamesView>(() => ({

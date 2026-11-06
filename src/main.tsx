@@ -5,6 +5,9 @@ import { t } from './i18n';
 import './styles.css';
 import './list.css';
 
+/**
+ * 顶层渲染错误边界，捕获 React 树未处理异常并提供重载入口。
+ */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string }> {
   state = { error: '' };
   static getDerivedStateFromError(error: Error) {

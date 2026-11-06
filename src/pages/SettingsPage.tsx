@@ -17,6 +17,9 @@ import { RetentionSettings } from '../components/RetentionSettings';
 import { LogSettings } from '../components/LogSettings';
 import type { AppState, Language, RestorePointRetention } from '../types';
 
+/**
+ * 全局设置页面：包含界面语言切换、恢复点保留策略、日志容量上限、存储库路径概览及已移除游戏管理入口。
+ */
 export function SettingsPage({
   state,
   busy,

@@ -14,6 +14,9 @@ import type {
   ImportDecision,
 } from './types';
 
+/**
+ * 移除游戏确认对话框组件：支持仅将游戏移入“已移除游戏”列表，或同时永久删除其关联的所有存档与恢复点记录。
+ */
 export function GameDeleteConfirmation({
   game,
   busy,
@@ -60,6 +63,9 @@ export function GameDeleteConfirmation({
   );
 }
 
+/**
+ * 导出游戏确认对话框组件：支持仅导出游戏配置或连同全部快照与恢复点一起打包导出。
+ */
 export function GameExportConfirmation({
   games,
   busy,
@@ -103,6 +109,9 @@ export function GameExportConfirmation({
   );
 }
 
+/**
+ * 游戏导入第 1 步对话框：展示扫描到的游戏包列表，并为与本地库冲突的游戏选择“覆盖”、“跳过”或“保留两者”。
+ */
 export function GameImportChoices({
   plan,
   busy,
@@ -277,6 +286,9 @@ export function GameImportChoices({
   );
 }
 
+/**
+ * 游戏导入第 2 步对话框：复用了 `ImportConflicts` 组件，对游戏导出包内附带的快照冲突进行逐项决策。
+ */
 export function GameImportReviewDialog({
   review,
   busy,
@@ -340,6 +352,9 @@ export function GameImportReviewDialog({
   );
 }
 
+/**
+ * 游戏导入第 3 步结果汇总对话框：分段展示游戏配置导入报告与各游戏下属快照的导入报告。
+ */
 export function GameImportResults({ report, onClose }: { report: GameImportReport; onClose: () => void }) {
   return (
     <div className="game-import-results">

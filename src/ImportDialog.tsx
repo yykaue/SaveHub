@@ -4,6 +4,7 @@ import { formatBytes, fullDate } from './format';
 import { t } from './i18n';
 import type { ImportAction, ImportDecision, ImportItem, ImportPlan, ImportReport, Snapshot } from './types';
 
+/** 判断目标快照是否允许被导入覆盖（受保护、待清除或已损坏的快照禁止覆盖） */
 const canOverwrite = (snapshot: Snapshot) => !snapshot.protected && !snapshot.purgePending && !snapshot.corrupted;
 const initialTarget = (item: ImportItem) => item.matches.find(canOverwrite) || item.matches[0];
 const stateLabels = (snapshot: Snapshot) =>
@@ -19,6 +20,10 @@ const targetDescription = (snapshot: Snapshot) =>
     ...stateLabels(snapshot),
   ].join(' · ');
 
+/**
+ * 快照导入冲突处理对话框组件：
+ * 支持逐项或批量选择“覆盖现有记录”、“跳过导入”或“自动重命名保留两者”，并对受保护/恢复点状态提供实时提示。
+ */
 export function ImportConflicts({
   plan,
   busy,
@@ -244,6 +249,9 @@ export function ImportConflicts({
 const snapshotHint = (snapshot: Snapshot) =>
   snapshot.protected ? 'import.protectedOverwriteHint' : 'import.cannotOverwriteHint';
 
+/**
+ * 导入执行结果报告组件：按已导入、已覆盖、已保留两者、已跳过及失败分类展示明细，并提示自动清理的恢复点数量。
+ */
 export function ImportResult({
   report,
   onClose,

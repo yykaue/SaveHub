@@ -22,23 +22,25 @@ import {
 } from './fs-utils.mjs';
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} gameId
-   * @param {string} id
-   * @param {string} destination
-    */
+ * 导出单个快照到指定目录，返回生成的导出包目录路径。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {string} id 快照 ID
+ * @param {string} destination 目标父目录绝对路径
+ */
 export async function exportSnapshot(store, gameId, id, destination) {
   const result = await store.exportSnapshots(gameId, [id], destination);
   return result.folder;
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} root
-   * @param {string} [onlyFolder]
-    */
+ * 解析 v2 命名导出索引目录（`.savehub-exports/*.json`），返回候选快照列表。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} root 包含 `.savehub-exports` 的根目录
+ * @param {string} [onlyFolder] 仅匹配指定子文件夹名称（当用户直接选中某个子文件夹导入时使用）
+ */
 export async function exportIndexCandidates(store, root, onlyFolder) {
   const indexDir = path.join(root, EXPORT_INDEX);
   await assertNoLinks(indexDir, store.lang);
@@ -72,12 +74,14 @@ export async function exportIndexCandidates(store, root, onlyFolder) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} directory
-    */
+ * 探测指定目录是否为 v2 命名导出的单个子目录或整个导出包根目录。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} directory 待探测的目录路径
+ */
 export async function namedExportCandidates(store, directory) {
-  // A single named folder can contain arbitrary game files named manifest.json or collection.json.
+  // 单个命名导出子目录内部可能包含游戏自身名为 manifest.json 或 collection.json 的存档文件，
+  // 因此优先从父目录的 .savehub-exports 索引定位，再回退到当前目录自身的 .savehub-exports 索引。
   return (
     (await exportIndexCandidates(store, path.dirname(directory), path.basename(directory))) ||
     (await exportIndexCandidates(store, directory))
@@ -85,12 +89,13 @@ export async function namedExportCandidates(store, directory) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} gameId
-   * @param {import('./models').Manifest} meta
-   * @param {string} folder
-    */
+ * 将单个快照的负载复制到目标导出目录，并执行全量哈希复核确保导出数据完整无误。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {import('./models').Manifest} meta 快照清单对象
+ * @param {string} folder 目标导出子目录
+ */
 export async function writeExport(store, gameId, meta, folder) {
   await copyRecords(
     path.join(store.snapshotDir(gameId, meta.id), 'payload'),
@@ -109,12 +114,17 @@ export async function writeExport(store, gameId, meta, folder) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
-
- * @param {string} gameId
-   * @param {string[] | 'all'} selection
-   * @param {string} destination
-    */
+ * 批量导出快照到指定目录：
+ * 1. 校验所选快照的完整性与目标磁盘剩余空间。
+ * 2. 先将所有快照写入目标目录下的隐藏暂存区 `.savehub-export-<batchId>` 并完成哈希校验。
+ * 3. 校验全部通过后才创建最终导出包目录，将暂存区文件原子重命名发布，并写入 `.savehub-exports/<batchId>.json` 索引。
+ * 4. 若发布中途出错，仅精准清理本次已发布的子目录与空容器，绝不误删目标目录中并发产生的其他文件。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
+ * @param {string[] | 'all'} selection 快照 ID 数组或 `'all'`
+ * @param {string} destination 目标父目录绝对路径
+ */
 export async function exportSnapshots(store, gameId, selection, destination) {
   return store.exclusive(async () => {
     const game = store.game(gameId);
@@ -150,8 +160,8 @@ export async function exportSnapshots(store, gameId, selection, destination) {
     const batchId = randomUUID();
     const stage = path.join(destination, `.savehub-export-${batchId}`);
     const existing = new Set((await fs.readdir(destination)).map(foldedName));
-    // Old unwrapped exports may retain index entries after a named folder is moved.
-    // Reserve those names so importing the new bundle cannot resolve to an old entry.
+    // 旧版未包裹外层目录的导出可能在子文件夹移走后仍残留索引项；
+    // 预留这些名称以防止新建导出包与旧索引中的目录名冲突。
     for (const candidate of (await exportIndexCandidates(store, destination)) || []) {
       existing.add(foldedName(path.basename(candidate.exported)));
     }
@@ -177,8 +187,7 @@ export async function exportSnapshots(store, gameId, selection, destination) {
           () => writeExport(store, gameId, meta, path.join(stage, directories[index])),
         );
       }
-      // Claim a fresh bundle only after all payloads are verified. Never replace
-      // a folder created by another process after our name preflight.
+      // 仅在所有快照负载均完成写入与校验后才创建最终导出目录，绝不覆盖其他进程在预检后创建的同名目录
       await store.fault('before-export-bundle-publish', { folder });
       await fs.mkdir(folder);
       folderCreated = true;
@@ -229,7 +238,7 @@ export async function exportSnapshots(store, gameId, selection, destination) {
         await fs.rm(target, { recursive: true, force: true });
       }
       if (folderCreated) {
-        // Remove only empty containers so concurrent, unrelated files survive.
+        // 仅使用 rmdir 删除空容器目录，确保并发写入的无关文件不会被误删
         await fs
           .rmdir(indexDir)
           .catch((err) => store.logger.warn('export-index-rmdir-failed', { indexDir, error: err.message }));
@@ -239,7 +248,7 @@ export async function exportSnapshots(store, gameId, selection, destination) {
       }
       throw error;
     } finally {
-      // This uniquely named, owned staging folder is always inside the chosen destination.
+      // 带随机 UUID 的专属暂存目录始终位于用户所选导出目录下，无论成功或失败均需清理
       if (!within(destination, stage, store.platform))
         await store.logger.error('export-stage-cleanup-refused', { stage, destination });
       else

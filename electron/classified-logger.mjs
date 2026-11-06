@@ -42,6 +42,12 @@ function operationOf(event, explicit) {
   return 'application';
 }
 
+/**
+ * 分级分类结构化日志引擎：
+ * 1. 按日志级别（info/warn/error）与操作类型（capture/restore/import 等）分文件存储为 JSONL；
+ * 2. 所有日志文件共享同一个字节预算（maxBytes），超出上限时按全局时间与序号淘汰最旧记录；
+ * 3. 通过 AsyncLocalStorage 自动关联同一事务下的 operationId，并在写入失败时静默降级以保证主业务不中断。
+ */
 export class Logger {
   /** @param {string} dataDir @param {{ maxBytes?: number; clock?: () => Date }} [options] */
   constructor(dataDir, { maxBytes = MAX_LOG_BYTES, clock = () => new Date() } = {}) {
@@ -183,7 +189,7 @@ export class Logger {
     }
   }
 
-  /** Apply a new shared budget in queue order, including clearing all retained logs at zero. @param {number} maxBytes */
+  /** 按写入队列顺序应用新的共享日志容量上限；当设置为 0 时清空所有已保留日志。 @param {number} maxBytes */
   setMaxBytes(maxBytes) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('Invalid log byte limit');
     const update = this.queue.then(async () => {

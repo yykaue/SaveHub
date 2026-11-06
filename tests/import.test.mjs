@@ -1,3 +1,7 @@
+/**
+ * 存档导入预检计划与覆盖替换事务测试套件：
+ * 覆盖两阶段导入预检、冲突决策（覆盖/跳过/共存）、源目录防篡改及替换事务崩溃恢复。
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -186,7 +190,7 @@ test('named exports retain metadata when kept alongside an existing import and r
   await store.updateSnapshot(gameId, imported.id, { label: '本地修改名称', note: '本地修改备注' });
   const plan = await store.prepareImport(gameId, path.join(folder, manual.label));
   assert.equal(plan.items[0].matches[0].id, imported.id);
-  // Renderer-visible objects cannot rewrite the server-owned plan or source paths.
+  // 渲染进程可见的返回对象被篡改时，不得影响主进程持有的导入计划与源路径。
   plan.items[0].source = path.join(base, 'forged-source');
   plan.items[0].name = '伪造名称';
   const report = await store.executeImport(plan.id, decide(plan, 'overwrite'));

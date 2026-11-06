@@ -479,7 +479,7 @@ await runE2E('interactions', async (harness) => {
   assert(trashExport.collection.snapshots.every((item) => item.manifest.deletedAt));
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(indexDir, selectedIndex), 'utf8')), selectedCollection);
 
-  // A game with only trash must still be able to export that tab.
+  // 仅包含回收站存档的游戏也必须支持导出当前标签页中的全部回收站存档
   const otherIds = otherGame.snapshots.map((item) => item.id);
   await page.evaluate(async ({ gameId, ids }) => window.savehub.updateSnapshots(gameId, ids, { deleted: true }), {
     gameId: gameB,

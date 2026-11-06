@@ -1,3 +1,7 @@
+/**
+ * 安全加固与边界条件回归测试套件：
+ * 覆盖损坏事务日志隔离、保留策略延迟清理、磁盘空间预算检查、日志轮转与路径大小写校验。
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -373,7 +377,7 @@ test('disk budgets enforce zero and exact thresholds, separate volumes and repor
   fs.statfs = async () => ({ bavail: 0, bsize: 4096 });
   syncBuiltinESMExports();
   await assert.rejects(assertDiskSpace(f.source, 1), /空间不足/);
-  // A 20,000-byte payload requires 86,536 bytes including the documented reserve.
+  // 20,000 字节的负载加上固定安全预留空间，共需至少 86,536 字节可用空间。
   for (const available of [86535, 86536, 86537]) {
     fs.statfs = async () => ({ bavail: available, bsize: 1 });
     syncBuiltinESMExports();

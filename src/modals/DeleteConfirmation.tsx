@@ -2,6 +2,10 @@ import { Star, Trash2 } from 'lucide-react';
 import { t } from '../i18n';
 import type { Snapshot } from '../types';
 
+/**
+ * 快照/恢复点删除确认对话框组件：
+ * 自动区分软删除（移入回收站或已移除恢复点）与永久物理删除，并对包含收藏项的批次显示显著警告。
+ */
 export function DeleteConfirmation({
   snapshots,
   permanent,

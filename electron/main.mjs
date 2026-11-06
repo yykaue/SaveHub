@@ -8,6 +8,7 @@ import { IPC_SCHEMA, validArguments } from '../shared/ipc-schema.mjs';
 import { translate } from './i18n.mjs';
 import { iconResponse } from './game-icons.mjs';
 
+// 注册自定义特权协议 savehub-icon://，用于向渲染进程安全提供游戏自定义图标流，避免在 IPC 状态中内联大体积 Base64
 protocol.registerSchemesAsPrivileged([
   { scheme: 'savehub-icon', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
@@ -27,11 +28,14 @@ let store;
 let lastProgressTime = 0;
 
 /**
- * @param {string} key
- * @param {Record<string, string | number>} [params]
+ * 根据当前存储库语言配置翻译文案。
+ *
+ * @param {string} key 翻译键
+ * @param {Record<string, string | number>} [params] 插值参数
  */
 const t = (key, params) => translate(store?.config?.language, key, params);
 
+// 确保应用单实例运行，防止多个进程并发读写同一存档库导致事务冲突
 const locked = app.requestSingleInstanceLock();
 if (!locked) {
   app.quit();
@@ -49,6 +53,7 @@ if (!locked) {
         onProgress: (progress) => {
           const now = Date.now();
           const isFinal = !progress || Boolean(progress.total && progress.completed >= progress.total);
+          // 限制非终态进度推送频率至最多每 80ms 一次，防止高频文件复制阻塞 IPC 通道
           if (!isFinal && now - lastProgressTime < 80) return;
           lastProgressTime = isFinal ? 0 : now;
           if (window && !window.isDestroyed()) window.webContents.send('savehub:progress', progress);
@@ -96,6 +101,9 @@ app.on('before-quit', (event) => {
   }
 });
 
+/**
+ * 根据当前系统平台与语言更新应用原生菜单（macOS 保留标准编辑与窗口菜单，Windows 隐藏菜单栏）。
+ */
 function updateApplicationMenu() {
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(
@@ -121,6 +129,9 @@ function updateApplicationMenu() {
   }
 }
 
+/**
+ * 创建主窗口并收紧安全边界（启用 sandbox、contextIsolation，禁止打开新窗口、外部导航及任何设备权限请求）。
+ */
 function createWindow() {
   window = new BrowserWindow({
     width: 1440,
@@ -164,14 +175,21 @@ function createWindow() {
   updateApplicationMenu();
 }
 
+/**
+ * 注册所有 IPC 命令处理器，并在入口处统一强制执行：
+ * 1. 调用来源 Frame 与 URL 校验（防止非受信任页面调用）；
+ * 2. 基于 `IPC_SCHEMA` 的运行时参数白名单校验；
+ * 3. 操作分类日志记录与结构化错误序列化；
+ * 4. 启动时全量比对已注册处理器与 `IPC_SCHEMA` 的契约一致性。
+ */
 function registerHandlers() {
   if (!store) return;
   const activeStore = store;
   const registered = new Set();
   /**
    * @template {import('../shared/contracts').CommandName} K
-   * @param {K} name
-   * @param {(...args: Parameters<import('../shared/contracts').Commands[K]>) => ReturnType<import('../shared/contracts').Commands[K]> | Awaited<ReturnType<import('../shared/contracts').Commands[K]>>} handler
+   * @param {K} name 命令名称
+   * @param {(...args: Parameters<import('../shared/contracts').Commands[K]>) => ReturnType<import('../shared/contracts').Commands[K]> | Awaited<ReturnType<import('../shared/contracts').Commands[K]>>} handler 处理函数
    */
   const register = (name, handler) => {
     registered.add(name);
@@ -215,7 +233,9 @@ function registerHandlers() {
     });
   };
   /**
-   * @param {string} title
+   * 弹出系统目录选择对话框。
+   *
+   * @param {string} title 对话框标题
    */
   const chooseFolder = async (title) => {
     if (!window) return null;

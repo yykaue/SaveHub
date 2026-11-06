@@ -1,3 +1,7 @@
+/**
+ * 存储引擎与摘要缓存性能基准测试脚本：
+ * 测量不同快照规模下的冷/热缓存 state() 耗时、IPC 序列化体积及大文件/多小文件快照采集吞吐量。
+ */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -55,7 +59,7 @@ for (const count of [100, 1000, 10000]) {
     rss: process.memoryUsage().rss,
   });
 }
-// Count bytes delivered by real read streams and bytes passed to FileHandle writes.
+// 统计通过真实读取流交付的字节数以及写入 FileHandle 的字节数。
 let reading = 0,
   writing = 0,
   peak = 0;

@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { t } from '../i18n';
 import { validLogLimit } from '../../shared/log-settings.mjs';
 
+/**
+ * 运行日志容量上限配置卡片组件（支持设置分类日志总容量上限及快速打开日志目录）。
+ */
 export function LogSettings({
   value,
   busy,

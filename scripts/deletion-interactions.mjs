@@ -219,7 +219,7 @@ await runE2E('deletion-interactions', async (harness) => {
     'Restore points support select-all removal; removed points support selected and select-all physical deletion at minimum window size',
   );
 
-  // Reproduce an older version's protected trash record without bypassing the new API guard.
+  // 模拟旧版本遗留的“已受保护但位于回收站”的记录，验证必须先找回才能取消保护或删除
   await atomicJson(path.join(store.snapshotDir(gameId, kept.id), 'manifest.json'), {
     ...(await store.readSnapshot(gameId, kept.id)),
     deletedAt: new Date().toISOString(),

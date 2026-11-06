@@ -3,7 +3,7 @@ import os from 'node:os';
 import templates from '../shared/game-templates.json' with { type: 'json' };
 
 /**
- * Read the small, literal subset used by the reference scripts. Never execute shell code.
+ * 静态解析旧版备份脚本中的字面量路径与条目配置，绝不执行任何 Shell 代码。
  * @param {string} text
  * @param {string} [platform]
  */

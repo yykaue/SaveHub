@@ -182,8 +182,7 @@ await runE2E('import-interactions', async (harness) => {
 
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 960));
   const calls = await application.evaluate(() => globalThis.__importPickerCalls);
-  // The legacy banner is intentionally hidden once active imports exist; exercise
-  // its preload/IPC directory branch without changing that established UI rule.
+  // 当存在已导入存档时界面会隐藏传统备份横幅；直接通过 preload/IPC 调用验证 useLegacy 分支不会触发文件夹选择器
   const legacyPlan = await page.evaluate((id) => window.savehub.importSnapshots(id, true), gameId);
   assert.equal(legacyPlan.items.filter((item) => item.matches.length).length, 4);
   await page.evaluate((id) => window.savehub.cancelImport(id), legacyPlan.id);

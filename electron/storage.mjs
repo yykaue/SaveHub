@@ -77,6 +77,11 @@ export {
 export const THEMES = ['ink', 'tech', 'cyber', 'glass'];
 export const DEFAULT_MAX_RESTORE_POINTS = DEFAULT_RETENTION.active;
 
+/**
+ * SaveHub 核心存储与事务协调中心：
+ * 管理本地保险库目录（vault）、全局配置（library.json）、快照摘要缓存（manifestCache）、
+ * 互斥写锁（exclusive）以及启动时的未决事务恢复与恢复点队列裁剪。
+ */
 export class SaveStore {
   /**
    * @param {string} dataDir
@@ -222,7 +227,7 @@ export class SaveStore {
     await this.logger.setMaxBytes(this.config.logLimitMB * BYTES_PER_MB).catch(() => {});
     await restore_transaction.recoverTransactions(this);
     for (const game of this.config.games.filter((game) => game.purgeGamePending || game.purgeSnapshotsPending)) {
-      // Older snapshot-only cleanup intents retain their original scope.
+      // 旧版仅清理快照的挂起意图（purgeSnapshotsPending）在启动恢复时保持其原有清理范围。
       try {
         await (game.purgeGamePending ? purgeGame(this, game.id) : purgeGameSnapshots(this, game.id));
       } catch (error) {
@@ -248,6 +253,7 @@ export class SaveStore {
   }
 
   /**
+   * 全局串行写操作互斥锁：拒绝并发写请求，并在任务结束时重置进度面板状态。
    * @template T
    * @param {() => Promise<T>} action
    * @returns {Promise<T>}
@@ -278,7 +284,7 @@ export class SaveStore {
     return game;
   }
 
-  /** @param {string} gameId */
+  /** 校验游戏是否可写：当游戏存在未决或回滚失败的恢复事务时拒绝一切修改 @param {string} gameId */
   assertGameWritable(gameId) {
     if (this.blockedGames.has(gameId)) throw this.error('storage.gameRecoveryBlocked');
   }
@@ -315,8 +321,7 @@ export class SaveStore {
     if (!directoryStat) return [];
     const directorySignature = `${directoryStat.ino}:${directoryStat.mtimeNs}:${directoryStat.ctimeNs}`;
     const cached = this.manifestCache.get(`${gameId}/list`);
-    // Own writes invalidate synchronously. External edits have a bounded one-second
-    // list refresh delay; every mutation/verification always reads the full manifest.
+    // 内部写入会同步主动失效缓存；外部直接修改目录的列表刷新延迟不超过 1 秒，且所有写操作与校验始终重读完整 manifest。
     if (cached?.signature === directorySignature && Date.now() - cached.time < 1000) {
       /** @type {import('../shared/contracts').Snapshot[]} */
       const items = cached.ids.map((/** @type {string} */ id) => this.manifestCache.get(`${gameId}/${id}`)?.meta);
@@ -409,7 +414,7 @@ export class SaveStore {
               (item) => item.isDirectory() && item.name.startsWith('ArchiveFile'),
             ).length;
           } catch {
-            /* Optional legacy folder. */
+            /* 旧版备份目录为可选项，不存在或不可读时静默忽略。 */
           }
         }
         const stored = await this.snapshots(game.id, true);
@@ -524,7 +529,7 @@ export class SaveStore {
       this.config = previous;
       throw error;
     }
-    // library.json is authoritative; a failed cache write cannot undo a committed game.
+    // library.json 是唯一权威数据源；游戏目录下的 game.json 缓存写入失败不回滚已提交的配置。
     await atomicJson(path.join(this.gameDir(game.id), 'game.json'), game).catch((err) =>
       this.logger.warn('game-cache-write-failed', { gameId: game.id, error: err.message }),
     );
@@ -637,10 +642,28 @@ export class SaveStore {
   }
 
   /**
+   * 采集并校验游戏存档快照的核心流水线：
+   * 1. 预检源路径无符号链接且游戏可写，扫描源目录并检查保险库磁盘空间；
+   * 2. 将源文件流式复制到临时暂存目录 `.pending-<id>/payload` 并计算 SHA-256；
+   * 3. 重新扫描暂存目录与源目录，双向比对签名以防备份期间游戏正在写入导致数据撕裂；
+   * 4. 生成并校验 `manifest.json`，最后原子提交目录（或走覆盖导入的两阶段替换事务）。
    * @param {import('./models').StoredGame} game
    * @param {string} root
    * @param {string[]} entries
-   * @param {any} [options]
+   * @param {{
+   *   label?: string;
+   *   note?: string;
+   *   kind?: string;
+   *   allowMissing?: boolean;
+   *   origin?: { path?: string; gameId?: string; snapshotId?: string };
+   *   favorite?: boolean;
+   *   protected?: boolean;
+   *   expectedFingerprint?: string;
+   *   replace?: import('./models').Manifest;
+   *   metadata?: Record<string, any>;
+   *   initialSource?: import('./models').Inventory;
+   *   skipDiskCheck?: boolean;
+   * }} [options]
    */
   async capture(
     game,
@@ -752,7 +775,7 @@ export class SaveStore {
       this.onProgress({ phase: 'copying', detail: label, completed: 1, total: 1, percent: 100 });
       return meta;
     } finally {
-      // A pending replacement journal owns its stage until rollback/recovery finishes.
+      // 未决的导入覆盖事务日志（import-transactions）持有其暂存目录所有权，直到回滚或恢复流程完成。
       if (!replace || !(await statMaybe(path.join(this.dataDir, 'import-transactions', `${id}.json`)))) {
         await fs
           .rm(stage, { recursive: true, force: true })
@@ -909,7 +932,7 @@ export class SaveStore {
           : selection;
       if (selection === 'all' && ids.length === 0) return { updated: [], failed: [] };
       const selected = this.validateSelection(ids);
-      // Validate ownership and every manifest before changing the first item.
+      // 在修改任何一条记录前，预先校验全部选中快照的归属、存在性及状态约束。
       const metas = [];
       for (const id of selected) metas.push(await this.readSnapshot(gameId, id));
       if (changes.deleted === false) validateRecoveryCount(this, gameId, metas);
@@ -960,7 +983,7 @@ export class SaveStore {
     const selected = this.validateSelection(ids);
     const root = path.resolve(this.gameDir(gameId), 'snapshots');
     const items = [];
-    // Preflight the whole selection before marking or deleting any files.
+    // 在标记或物理删除任何文件前，对所有选中快照执行完整预检（含符号链接树检查）。
     for (const id of selected) {
       const meta = await this.readSnapshot(gameId, id);
       if (!meta.deletedAt) throw this.error('storage.purgeOnlyDeleted');
@@ -988,8 +1011,7 @@ export class SaveStore {
     for (const { meta, folder, stage, marker } of items) {
       try {
         await this.fault('before-purge', { gameId, id: meta.id });
-        // Keep the intent outside the directory being physically removed, so an
-        // interrupted/partial deletion remains visible and can only be retried.
+        // 将删除意图标记文件保存在待物理移除目录外部，确保中断或部分删除后仍可见且只能继续重试删除。
         await atomicJson(marker, { ...meta, purgePending: true });
         this.invalidateSnapshotCache(gameId, meta.id);
         if (await statMaybe(folder)) await commitSnapshotDirectory(folder, stage);
@@ -1019,7 +1041,7 @@ export class SaveStore {
       await this.fault('before-retention', { gameId });
       return await pruneRestorePoints(this, gameId);
     } catch (error) {
-      // Retention is maintenance after commit, never a reason to roll back saves.
+      // 恢复点队列裁剪属于事务提交后的维护步骤，绝不能因裁剪失败而回滚已提交的存档。
       await this.logger.warn('prune-deferred', {
         operation: 'prune',
         gameId,
@@ -1084,8 +1106,7 @@ export class SaveStore {
     return snapshot_import.executeImportPlan(this, planId, decisions);
   }
 
-  // Non-interactive callers retain the conservative default of skipping duplicates.
-  // The desktop UI always uses prepareImport + explicit per-item decisions.
+  // 非交互式调用方保留跳过重复项的保守默认策略；桌面端 UI 始终使用 prepareImport + 逐项显式决策。
   /**
    * @param {string} gameId
    * @param {string} directory

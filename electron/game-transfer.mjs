@@ -52,9 +52,11 @@ const publicSavePlan = (/** @type {any} */ plan) => ({
 });
 
 /**
- * @param {any} input
- * @param {any} [existing]
- * @param {string} [lang]
+ * 校验并规范化游戏配置输入（名称长度、双平台路径与条目、图标格式及体积、恢复点保留策略）。
+ *
+ * @param {any} input 原始游戏配置输入
+ * @param {any} [existing] 已存在的游戏配置对象（更新或覆盖时传入）
+ * @param {string} [lang] 语言代码
  * @returns {import('./models').StoredGame}
  */
 export function normalizeGame(input, existing = null, lang = undefined) {
@@ -101,8 +103,10 @@ export function normalizeGame(input, existing = null, lang = undefined) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} id
+ * 物理清空已软删除游戏的所有快照目录及相关导入事务日志，但保留游戏元数据本身。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} id 游戏 ID
  */
 export async function purgeGameSnapshots(store, id) {
   const game = store.game(id, true);
@@ -128,8 +132,10 @@ export async function purgeGameSnapshots(store, id) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} id
+ * 彻底物理删除已软删除且标记为 `purgeGamePending` 的游戏整个目录及全局配置项。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} id 游戏 ID
  */
 export async function purgeGame(store, id) {
   const game = store.game(id, true);
@@ -150,14 +156,16 @@ export async function purgeGame(store, id) {
   for (const file of journals) await fs.rm(file, { force: true });
   store.invalidateGameCache(id);
   await store.fault('before-game-config-delete', { gameId: id });
-  // Persist removal without writing game.json again into the deleted directory.
+  // 直接从全局配置中移除该游戏，避免向已删除的游戏目录再次写入 game.json
   await store.forgetGame(id);
   await store.logger.info('purge-game', { gameId: id });
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} gameId
+ * 查找指定游戏关联的所有导入替换事务日志文件路径。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} gameId 游戏 ID
  */
 async function gameImportJournals(store, gameId) {
   const directory = path.join(store.dataDir, 'import-transactions');
@@ -177,10 +185,13 @@ async function gameImportJournals(store, gameId) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} id
- * @param {boolean} undo
- * @param {boolean} deleteRecords
+ * 软删除、恢复或彻底删除游戏：
+ * - 彻底删除时采用两阶段提交：先将 `purgeGamePending = true` 持久化到配置中，再执行物理删除，保证崩溃后可重试。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} id 游戏 ID
+ * @param {boolean} undo 是否恢复已软删除的游戏
+ * @param {boolean} deleteRecords 是否彻底删除游戏及其所有快照记录
  */
 export async function removeGame(store, id, undo, deleteRecords) {
   if (typeof undo !== 'boolean' || typeof deleteRecords !== 'boolean' || (undo && deleteRecords)) {
@@ -196,7 +207,7 @@ export async function removeGame(store, id, undo, deleteRecords) {
   if (undo) delete next.deletedAt;
   else next.deletedAt = next.deletedAt || new Date().toISOString();
   if (deleteRecords) {
-    // Check links before committing intent; the journal flag makes partial removal retryable.
+    // 在持久化删除意图前先检查符号链接；标记写入后若中途崩溃可在启动或下次调用时安全重试
     await assertTreeNoLinks(store.gameDir(id), store.lang);
     next.purgeGamePending = true;
     delete next.purgeSnapshotsPending;
@@ -206,10 +217,14 @@ export async function removeGame(store, id, undo, deleteRecords) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string[]} ids
- * @param {string} destination
- * @param {boolean} includeSnapshots
+ * 批量导出游戏配置（可选附带所有快照）到指定目录：
+ * - 先在 `.savehub-games-<uuid>` 暂存区完成所有 `game.json` 与快照负载的写入和哈希校验；
+ * - 全部校验通过后才创建最终导出包目录并原子发布，失败时安全回滚本次已发布内容。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string[]} ids 待导出的游戏 ID 列表
+ * @param {string} destination 目标父目录绝对路径
+ * @param {boolean} includeSnapshots 是否同时导出游戏下的所有快照
  */
 export async function exportGames(store, ids, destination, includeSnapshots) {
   if (typeof includeSnapshots !== 'boolean') throw store.error('gameTransfer.invalidGameExportOptions');
@@ -286,7 +301,7 @@ export async function exportGames(store, ids, destination, includeSnapshots) {
                 },
               );
             }
-            // An empty game remains a valid combined bundle without a fake save candidate.
+            // 没有快照的空游戏也是合法的整包导出，无需生成空的 collection.json
             if (records.length) {
               await atomicJson(path.join(target, 'snapshots', '.savehub-exports', 'collection.json'), {
                 version: 2,
@@ -362,8 +377,10 @@ export async function exportGames(store, ids, destination, includeSnapshots) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {any} item
+ * 查找本地库中与待导入游戏冲突（相同 ID、相同导入源 ID 或忽略大小写同名）的游戏列表。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {any} item 待导入游戏条目
  */
 function matches(store, item) {
   return store.config.games
@@ -377,8 +394,10 @@ function matches(store, item) {
 }
 
 /**
- * @param {string} directory
- * @param {string} [lang]
+ * 读取并校验单个游戏导出目录中的 `game.json` 元数据及其文本 SHA-256 摘要。
+ *
+ * @param {string} directory 单个游戏导出目录
+ * @param {string} [lang] 语言代码
  */
 async function readBundle(directory, lang) {
   const file = path.join(directory, 'game.json');
@@ -411,8 +430,11 @@ async function readBundle(directory, lang) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} directory
+ * 游戏导入第 1 阶段（Prepare）：
+ * 扫描游戏导出目录（支持多游戏包 `games.json` 或单游戏目录 `game.json`），检测本地同名/同 ID 游戏冲突。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} directory 导入源目录
  */
 export async function prepareGameImport(store, directory) {
   store.pendingGameImport = null;
@@ -493,8 +515,10 @@ export async function prepareGameImport(store, directory) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} id
+ * 获取并校验当前挂起的游戏导入计划。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} id 游戏导入计划 ID
  */
 function requirePlan(store, id) {
   if (!store.pendingGameImport || store.pendingGameImport.id !== id) {
@@ -504,8 +528,10 @@ function requirePlan(store, id) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {any} plan
+ * 复核导入源目录中的 `game.json` 哈希及本地冲突匹配列表是否在交互期间发生改变。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {any} plan 游戏导入计划
  */
 async function checkGames(store, plan) {
   for (const [index, item] of plan.items.entries()) {
@@ -517,9 +543,13 @@ async function checkGames(store, plan) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} planId
- * @param {any[]} decisions
+ * 游戏导入第 2 阶段（Review）：
+ * 根据用户对游戏冲突的决策（覆盖、跳过、保留两者），确定每个游戏的最终目标对象，
+ * 并进一步扫描附带的 `snapshots/` 目录以生成快照级冲突计划。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} planId 游戏导入计划 ID
+ * @param {any[]} decisions 游戏级冲突决策列表
  */
 export async function reviewGameImport(store, planId, decisions) {
   const plan = requirePlan(store, planId);
@@ -575,7 +605,7 @@ export async function reviewGameImport(store, planId, decisions) {
     let snapshotPlan = null;
     const source = path.join(item.directory, 'snapshots');
     if (item.includesSnapshots && item.snapshotCount > 0) {
-      // Only the named, verified export format is accepted inside a game bundle.
+      // 游戏导出包内仅允许经过校验的 v2 命名导出索引格式
       if (!(await exportIndexCandidates(store, source))) {
         throw store.error('gameTransfer.missingBundleSnapshotIndex');
       }
@@ -593,7 +623,7 @@ export async function reviewGameImport(store, planId, decisions) {
       ) {
         throw store.error('gameTransfer.bundleSnapshotCountOrOwnerMismatch');
       }
-      // Keep the exact index bytes to reject metadata edits between review and execution.
+      // 记录索引文件原始字节哈希，防止在 review 与 execute 之间篡改快照元数据
       snapshotPlan.indexHash = await indexHash(source, store.lang);
       failed.push(
         ...snapshotPlan.failed.map((/** @type {any} */ error) => ({ ...error, name: `${game.name} / ${error.name}` })),
@@ -623,8 +653,10 @@ export async function reviewGameImport(store, planId, decisions) {
 }
 
 /**
- * @param {string} directory
- * @param {string} [lang]
+ * 计算 `.savehub-exports/*.json` 索引文件的联合 SHA-256 摘要，用于防篡改校验。
+ *
+ * @param {string} directory 包含 `.savehub-exports` 的快照目录
+ * @param {string} [lang] 语言代码
  */
 async function indexHash(directory, lang) {
   const root = path.join(directory, '.savehub-exports');
@@ -638,9 +670,14 @@ async function indexHash(directory, lang) {
 }
 
 /**
- * @param {import('./storage.mjs').SaveStore} store
- * @param {string} reviewId
- * @param {any[]} decisions
+ * 游戏导入第 3 阶段（Execute）：
+ * 1. 复核所有游戏配置、快照索引哈希及快照源文件指纹未发生并发变动。
+ * 2. 逐个提交游戏配置并执行关联的快照导入计划。
+ * 3. 所有游戏与快照导入完毕后，统一对本次导入涉及的游戏执行恢复点保留策略清理。
+ *
+ * @param {import('./storage.mjs').SaveStore} store 存储引擎实例
+ * @param {string} reviewId 审查阶段生成的令牌 ID
+ * @param {any[]} decisions 每个游戏的快照级冲突决策列表
  */
 export async function executeGameImport(store, reviewId, decisions) {
   const plan = store.pendingGameImport,
@@ -711,7 +748,7 @@ export async function executeGameImport(store, reviewId, decisions) {
       report.games.failed.push({ name: entry.game.name, error: /** @type {Error} */ (error).message });
     }
   }
-  // Every game and snapshot is imported before either retention queue is pruned.
+  // 待所有游戏与快照全部导入完毕后，统一清理自动恢复点与回收站队列
   await progressTask(store, 'pruning', '', 95, 100, async () => {
     for (const id of importedGameIds) await store.pruneRestorePoints(id);
   });

@@ -1,14 +1,18 @@
+// 主题、语言与支持的目标平台类型定义
 export type Theme = 'ink' | 'tech' | 'cyber' | 'glass';
 export type Language = 'zh' | 'en';
 export type Platform = 'win32' | 'darwin';
+// 自动恢复点保留策略：active 为正常恢复点上限，removed 为已移除恢复点队列上限
 export interface RestorePointRetention {
   active: number;
   removed: number;
 }
+// 单个平台下的存档目录配置：root 为绝对根目录，items 为相对于 root 的备份路径列表
 export interface Location {
   root: string;
   items: string[];
 }
+// 对外暴露的快照摘要模型（不包含内部文件级 records 明细，降低 IPC 传输体积）
 export interface Snapshot {
   id: string;
   gameId: string;
@@ -29,6 +33,7 @@ export interface Snapshot {
   error?: string;
   purgePending?: boolean;
 }
+// 新增或编辑游戏时的表单输入载荷
 export interface GameInput {
   id?: string;
   name: string;
@@ -39,6 +44,7 @@ export interface GameInput {
   legacyRoot: string;
   restorePointRetention?: Partial<RestorePointRetention>;
 }
+// 前端渲染层使用的完整游戏状态模型
 export interface Game extends GameInput {
   id: string;
   createdAt: string;
@@ -52,6 +58,7 @@ export interface Game extends GameInput {
   restorePointRetentionEffective: RestorePointRetention;
   recoveryBlocked?: boolean;
 }
+// 应用全局状态快照，由主进程 state() 聚合后下发至渲染进程
 export interface AppState {
   games: Game[];
   theme: Theme;
@@ -63,6 +70,7 @@ export interface AppState {
   restorePointRetention: RestorePointRetention;
   logLimitMB: number;
 }
+// 后台长耗时任务的阶段枚举与进度载荷
 export type ProgressPhase = 'checking' | 'copying' | 'restoring' | 'deleting' | 'importing' | 'exporting' | 'pruning';
 export interface Progress {
   phase: ProgressPhase;
@@ -71,6 +79,7 @@ export interface Progress {
   total?: number;
   percent?: number;
 }
+// 导入冲突处理动作：覆盖本地同名/同源项、跳过本次导入、或重命名共存
 export type ImportAction = 'overwrite' | 'skip' | 'keep-both';
 export interface ImportDecision {
   itemId: string;
@@ -85,6 +94,7 @@ export interface ImportItem {
   fileCount: number;
   matches: Snapshot[];
 }
+// 存档导入预检计划：在实际写入前返回冲突候选供用户确认
 export interface ImportPlan {
   id: string;
   gameId: string;
@@ -92,6 +102,7 @@ export interface ImportPlan {
   items: ImportItem[];
   failed: { name: string; error: string }[];
 }
+// 存档导入执行结果报告（含恢复点队列自动裁剪统计 pruned）
 export interface ImportReport {
   imported: string[];
   overwritten: string[];
@@ -121,6 +132,7 @@ export interface GameImportItem {
     purgeSnapshotsPending?: boolean;
   })[];
 }
+// 整包游戏导入三阶段流程：1. 预检游戏冲突(GameImportPlan) -> 2. 审查附带存档冲突(GameImportReview) -> 3. 执行导入(GameImportReport)
 export interface GameImportPlan {
   id: string;
   directory: string;
@@ -141,6 +153,7 @@ export interface GameImportReport {
   games: ImportReport;
   snapshots: { gameName: string; report: ImportReport }[];
 }
+// Preload 暴露在 window.savehub 上的跨进程通信桥接契约
 export interface Bridge {
   state(): Promise<AppState>;
   setTheme(theme: Theme): Promise<void>;

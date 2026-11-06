@@ -1,3 +1,7 @@
+/**
+ * 游戏配置与存档包跨库导入导出测试套件：
+ * 覆盖游戏配置导出/导入、同名冲突合并、存档子计划决策、并发锁与崩溃恢复等场景。
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

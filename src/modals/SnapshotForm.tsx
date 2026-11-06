@@ -4,6 +4,9 @@ import { dateLabel } from '../format';
 import { t } from '../i18n';
 import type { Snapshot } from '../types';
 
+/**
+ * 新建手动存档快照或编辑已有快照名称与备注的表单组件。
+ */
 export function SnapshotForm({
   snapshot,
   busy,

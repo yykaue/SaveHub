@@ -40,7 +40,7 @@ if (!process.versions.electron) {
   app.commandLine.appendSwitch('force-device-scale-factor', '1');
   app.commandLine.appendSwitch('force-color-profile', 'srgb');
   let window;
-  // Let Electron finish evaluating the ESM entry before awaiting app readiness.
+  // 等待 Electron 完成 ESM 入口求值后再响应 app.whenReady，通过离屏渲染将 SVG 光栅化为 PNG 与多尺寸 ICO
   app.whenReady().then(async () => {
     try {
       window = new BrowserWindow({
@@ -76,7 +76,7 @@ if (!process.versions.electron) {
         offset += frame.length;
       }
       const ico = Buffer.concat([header, ...frames]);
-      // Render and validate everything before replacing either committed asset.
+      // 先完成全部尺寸渲染与校验，再通过临时文件原子替换产物
       for (const [name, bytes] of [
         ['icon.png', png],
         ['icon.ico', ico],

@@ -1,5 +1,6 @@
 import { translate } from './i18n.mjs';
 
+/** 携带多语言错误码与模板参数的业务异常类 */
 export class AppError extends Error {
   /** @param {string} code @param {Record<string, string | number>} [params] @param {string} [language] */
   constructor(code, params = {}, language) {
@@ -10,7 +11,7 @@ export class AppError extends Error {
   }
 }
 
-/** @param {unknown} error @param {string} [language] */
+/** 将业务异常或底层 Node.js 文件系统错误序列化为统一的跨进程错误结构 @param {unknown} error @param {string} [language] */
 export function serializeError(error, language) {
   if (error instanceof AppError) return { code: error.code, params: error.params, message: error.message };
   const value = /** @type {NodeJS.ErrnoException} */ (error);

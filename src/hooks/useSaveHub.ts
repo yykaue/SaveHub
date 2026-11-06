@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { getLanguage, getLanguageMeta, normalizeLanguage, setLanguage, subscribeLanguage, t } from '../i18n';
 import { animate } from '../motion';
 import type { AppState, Progress } from '../types';
+/**
+ * SaveHub 核心状态与异步操作管理 Hook：
+ * 负责拉取主进程全量状态、同步语言与主题、订阅后台任务进度事件、管理全局忙碌锁与 Toast 提示。
+ */
 export function useSaveHub(onStart: () => void, onClose: () => void) {
   const api = window.savehub;
   useSyncExternalStore(subscribeLanguage, getLanguage);
@@ -32,7 +36,7 @@ export function useSaveHub(onStart: () => void, onClose: () => void) {
       })
       .catch((error) => setBootError(error.message));
     return api?.onProgress((next) => {
-      // Keep the last completed progress visible until the result and refreshed state arrive.
+      // 保留最后一次完成的进度显示，直到异步操作结果与最新状态刷新完毕后再由 perform 统一清空
       if (next) setProgress(next);
     });
   }, [refresh, api]);
@@ -43,6 +47,9 @@ export function useSaveHub(onStart: () => void, onClose: () => void) {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  /**
+   * 串行执行异步操作：自动维护 `busy` 状态锁、清理并跟踪进度条、操作后刷新状态并弹出成功/失败提示。
+   */
   const perform = async <T>(label: string, action: () => Promise<T>, success?: string, close = false) => {
     if (busy) return null;
     setProgress(null);

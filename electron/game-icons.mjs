@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
 
 const MAX_ICON_CACHE = 64;
-/** @type {Map<string, { hash: string; mime: string | null; buffer: Buffer | null }>} */
+/** @type {Map<string, { hash: string; mime: string | null; buffer: Buffer<ArrayBuffer> | null }>} */
 const iconCache = new Map();
 
-/** @param {string} dataUrl */
+/**
+ * 解析并缓存自定义图标的 SHA-256 摘要与二进制载荷（LRU 上限 64 条），
+ * 避免每次构建 state() 或响应协议请求时对最大 3MB 的 Base64 Data URL 重复计算哈希与解码。
+ * @param {string} dataUrl
+ */
 function parseAndHashIcon(dataUrl) {
   const cached = iconCache.get(dataUrl);
   if (cached) {
@@ -27,7 +31,9 @@ function parseAndHashIcon(dataUrl) {
   return entry;
 }
 
-/** Persisted data URLs remain portable; state sends only a stable, independently fetched resource URL.
+/**
+ * 配置文件中仍持久化完整的 Data URL 以保证跨设备导出的便携性；
+ * 下发给前端的 state() 仅传递带内容哈希版本号的轻量协议 URL，由渲染进程按需独立拉取并长期缓存。
  * @param {{id:string; icon:string}} game
  */
 export function publicIcon(game) {
@@ -36,7 +42,7 @@ export function publicIcon(game) {
     : game.icon;
 }
 
-/** @param {import('./storage.mjs').SaveStore} store @param {string} url */
+/** 处理 savehub-icon:// 自定义协议请求，校验游戏身份与版本哈希匹配后返回解码后的图片字节流 @param {import('./storage.mjs').SaveStore} store @param {string} url */
 export function iconResponse(store, url) {
   const parsed = new URL(url);
   if (parsed.hostname !== 'game' || !/^\/[a-zA-Z0-9-]+$/.test(parsed.pathname))

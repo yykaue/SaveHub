@@ -4,7 +4,12 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-/** @param {string} suite @param {(harness: Awaited<ReturnType<typeof createHarness>>) => Promise<void>} action */
+/**
+ * 运行单个 E2E 测试套件并统一收集截图、Trace 与清理报告。
+ *
+ * @param {string} suite 套件名称
+ * @param {(harness: Awaited<ReturnType<typeof createHarness>>) => Promise<void>} action 测试执行回调
+ */
 export async function runE2E(suite, action) {
   const harness = await createHarness(suite);
   let failure;
@@ -22,7 +27,11 @@ export async function runE2E(suite, action) {
   if (failure) throw failure;
 }
 
-/** @param {string} suite */
+/**
+ * 创建隔离的 E2E 测试夹具（独立临时数据目录、Electron 进程生命周期管理与 Playwright Trace 采集）。
+ *
+ * @param {string} suite 套件名称
+ */
 export async function createHarness(suite) {
   const root = path.resolve('.test-data');
   await fs.mkdir(root, { recursive: true });
@@ -78,7 +87,7 @@ export async function createHarness(suite) {
     done,
     close,
     async launch(/** @type {string} */ dataDir) {
-      await fs.access(executable); // An invalid requested package must never fall back to source.
+      await fs.access(executable); // 指定的打包产物若不存在必须直接报错，严禁静默回退到开发态源码运行
       /** @type {Record<string,string>} */
       const env = { SAVEHUB_DATA_DIR: dataDir };
       for (const [key, value] of Object.entries(process.env))
@@ -142,7 +151,12 @@ export async function createHarness(suite) {
   };
 }
 
-/** @param {import('@playwright/test').ElectronApplication} application @param {string|null} directory */
+/**
+ * 在主进程中桩入系统文件夹选择对话框返回值，便于自动化测试无交互选择目录。
+ *
+ * @param {import('@playwright/test').ElectronApplication} application Electron 应用实例
+ * @param {string|null} directory 模拟选中的目录路径（null 表示取消）
+ */
 export async function mockDirectory(application, directory) {
   await application.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: !folder, filePaths: folder ? [folder] : [] });

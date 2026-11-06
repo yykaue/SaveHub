@@ -4,6 +4,9 @@ import { formatBytes, fullDate, gameName } from '../format';
 import { t } from '../i18n';
 import type { Game, Platform, Snapshot } from '../types';
 
+/**
+ * 恢复存档确认对话框组件：清晰展示将被覆盖的目标游戏目录、受影响条目及自动安全备份说明。
+ */
 export function RestoreConfirm({
   snapshot,
   game,

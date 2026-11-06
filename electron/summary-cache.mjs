@@ -1,4 +1,4 @@
-/** Byte-bounded LRU for list summaries; never stores manifest file records. */
+/** 按字节数受限的快照摘要 LRU 缓存；仅缓存去除 records 后的轻量摘要，避免常驻大体积文件清单。 */
 export class SummaryCache extends Map {
   /** @param {number} [maxBytes] */
   constructor(maxBytes = 8 * 1024 * 1024) {

@@ -2,6 +2,8 @@ import { test } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+
+// 桌面端 Playwright E2E 入口：依次驱动 scripts/ 下的各端到端验证套件并挂载运行产物
 const suites = [
   'smoke',
   'interactions',

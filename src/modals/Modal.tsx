@@ -2,6 +2,11 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { t } from '../i18n';
 
+/**
+ * 无障碍模态对话框容器：
+ * - 打开时自动聚焦首个可交互控件，卸载时将焦点归还给触发元素；
+ * - 监听 `Escape` 关闭与 `Tab` / `Shift+Tab` 焦点陷阱（Focus Trap），防止键盘焦点逃逸到背景页面。
+ */
 export function Modal({
   title,
   children,

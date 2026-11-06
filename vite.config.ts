@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+// Vite 渲染进程构建配置：在生产构建时自动剥离开发服务器 WebSocket CSP 许可
 export default defineConfig(({ command }) => ({
   plugins: [
     react(),
