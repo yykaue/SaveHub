@@ -163,9 +163,16 @@ export async function withinOnDisk(root, target, platform = process.platform) {
     let current = path.resolve(target);
     while (true) {
       const stat = await statMaybe(current);
-      if (stat && stat.dev === rootStat.dev && stat.ino === rootStat.ino) return true;
+      if (
+        stat &&
+        rootStat.ino > 0 &&
+        stat.ino > 0 &&
+        stat.dev === rootStat.dev &&
+        stat.ino === rootStat.ino
+      )
+        return true;
       const parent = path.dirname(current);
-      if (parent === current) return false;
+      if (parent === current) return within(root, target, platform);
       current = parent;
     }
   }
