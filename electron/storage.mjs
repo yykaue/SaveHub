@@ -220,7 +220,7 @@ export class SaveStore {
       await this.saveConfig();
     }
     await this.logger.setMaxBytes(this.config.logLimitMB * BYTES_PER_MB).catch(() => {});
-    await this.recoverTransactions();
+    await restore_transaction.recoverTransactions(this);
     for (const game of this.config.games.filter((game) => game.purgeGamePending || game.purgeSnapshotsPending)) {
       // Older snapshot-only cleanup intents retain their original scope.
       try {
@@ -233,7 +233,7 @@ export class SaveStore {
         );
       }
     }
-    await this.recoverImportReplacements();
+    await snapshot_import.recoverImportReplacements(this);
     for (const game of this.config.games) {
       if (!game.deletedAt && !game.purgeGamePending && !game.purgeSnapshotsPending)
         await this.pruneRestorePoints(game.id);
@@ -332,18 +332,27 @@ export class SaveStore {
       throw error;
     }
     const ids = new Set(
-      entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith('.')).map((entry) => entry.name),
+      entries
+        .filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && !entry.name.startsWith('.'))
+        .map((entry) => entry.name),
     );
+    const purgeIds = new Set();
     for (const entry of entries) {
       const match = entry.name.match(/^\.purge-([a-z0-9-]{1,64})\.json$/);
-      if (match && entry.isFile()) ids.add(match[1]);
+      if (match && (entry.isFile() || entry.isSymbolicLink())) {
+        ids.add(match[1]);
+        purgeIds.add(match[1]);
+      }
     }
     const orderedIds = [...ids];
     for (let offset = 0; offset < orderedIds.length; offset += 8) {
       await Promise.all(
         orderedIds.slice(offset, offset + 8).map(async (id) => {
           try {
-            const meta = await this.readSnapshot(gameId, id, true);
+            const meta = await this.readSnapshot(gameId, id, true, {
+              trustedParent: true,
+              hasPurgeMarker: purgeIds.has(id),
+            });
             result.push(meta);
           } catch (error) {
             /** @type {import('../shared/contracts').Snapshot} */
@@ -394,7 +403,7 @@ export class SaveStore {
           }
         }
         let legacyCount = 0;
-        if (game.legacyRoot) {
+        if (game.legacyRoot && !game.deletedAt) {
           try {
             legacyCount = (await fs.readdir(game.legacyRoot, { withFileTypes: true })).filter(
               (item) => item.isDirectory() && item.name.startsWith('ArchiveFile'),
@@ -589,7 +598,6 @@ export class SaveStore {
    * @param {string[]} [entriesOverride]
    */
   async location(game, entriesOverride) {
-    this.assertGameWritable(game.id);
     const location = game.locations[this.platform];
     if (!location?.root || !path.isAbsolute(location.root)) {
       throw this.error('storage.unconfiguredRoot');
@@ -620,6 +628,7 @@ export class SaveStore {
   async createSnapshot(gameId, options = {}) {
     return this.exclusive(async () => {
       const game = this.game(gameId);
+      this.assertGameWritable(gameId);
       const { root, entries } = await this.location(game);
       return publicSnapshot(
         await this.capture(game, root, entries, { label: options.label, note: options.note, kind: 'manual' }),
@@ -648,6 +657,8 @@ export class SaveStore {
       expectedFingerprint,
       replace,
       metadata,
+      initialSource,
+      skipDiskCheck = false,
     } = {},
   ) {
     if (typeof label !== 'string' || !label.trim() || label.length > 100) {
@@ -658,14 +669,16 @@ export class SaveStore {
     }
     await assertNoLinks(root, this.lang);
     this.assertGameWritable(game.id);
-    const source = await inventory(root, entries, {
-      allowMissing,
-      progress: progressRange(this.onProgress, 0, 10),
-      lang: this.lang,
-      hash: false,
-    });
+    const source = initialSource
+      ? { absent: [...initialSource.absent], records: initialSource.records.map((record) => ({ ...record })) }
+      : await inventory(root, entries, {
+          allowMissing,
+          progress: progressRange(this.onProgress, 0, 10),
+          lang: this.lang,
+          hash: false,
+        });
     const totalBytes = source.records.reduce((total, record) => total + (record.size || 0), 0);
-    await assertDiskSpace(this.vault, totalBytes, this.lang);
+    if (!skipDiskCheck) await assertDiskSpace(this.vault, totalBytes, this.lang);
     const id = randomUUID();
     const stage = path.join(this.gameDir(game.id), 'snapshots', `.pending-${id}`);
     const destination = this.snapshotDir(game.id, id);
@@ -675,6 +688,7 @@ export class SaveStore {
         path.join(stage, 'payload'),
         source.records,
         progressRange(this.onProgress, 10, 70),
+        this.lang,
       );
       if (expectedFingerprint && fingerprint(source) !== expectedFingerprint) {
         throw this.error('storage.importSourceChangedAfterConfirm');
@@ -729,7 +743,7 @@ export class SaveStore {
       validateManifest(meta, this.lang);
       await atomicJson(path.join(stage, 'manifest.json'), meta);
       if (replace) {
-        await this.replaceImportedSnapshot(game.id, replace, stage, id);
+        await snapshot_import.replaceImportedSnapshot(this, game.id, replace, stage, id);
         this.invalidateSnapshotCache(game.id, replace.id);
       } else {
         await commitSnapshotDirectory(stage, destination);
@@ -747,23 +761,27 @@ export class SaveStore {
     }
   }
 
-  /** @overload @param {string} gameId @param {string} id @param {false} [summaryOnly] @returns {Promise<import('./models').Manifest>} */
-  /** @overload @param {string} gameId @param {string} id @param {true} summaryOnly @returns {Promise<Omit<import('./models').Manifest, 'records'>>} */
+  /** @overload @param {string} gameId @param {string} id @param {false} [summaryOnly] @param {{ trustedParent?: boolean; hasPurgeMarker?: boolean }} [options] @returns {Promise<import('./models').Manifest>} */
+  /** @overload @param {string} gameId @param {string} id @param {true} summaryOnly @param {{ trustedParent?: boolean; hasPurgeMarker?: boolean }} [options] @returns {Promise<Omit<import('./models').Manifest, 'records'>>} */
   /**
    * @param {string} gameId
    * @param {string} id
    * @param {boolean} [summaryOnly]
+   * @param {{ trustedParent?: boolean; hasPurgeMarker?: boolean }} [options]
    */
-  async readSnapshot(gameId, id, summaryOnly = false) {
+  async readSnapshot(gameId, id, summaryOnly = false, options = {}) {
     const folder = this.snapshotDir(gameId, id);
-    await assertNoLinks(folder, this.lang);
-    const marker = path.join(path.dirname(folder), `.purge-${id}.json`);
-    await assertNoLinks(marker, this.lang);
-    const markerStat = await statBigIntMaybe(marker);
+    const parentDir = path.dirname(folder);
+    if (!options.trustedParent) await assertNoLinks(parentDir, this.lang);
+    const folderStat = await statBigIntMaybe(folder);
+    if (folderStat?.isSymbolicLink()) throw this.error('storage.symlinkNotSupported', { path: folder });
+    const marker = path.join(parentDir, `.purge-${id}.json`);
+    const markerStat = options.hasPurgeMarker === false ? null : await statBigIntMaybe(marker);
+    if (markerStat?.isSymbolicLink()) throw this.error('storage.symlinkNotSupported', { path: marker });
     const pending = Boolean(markerStat);
     const file = pending ? marker : path.join(folder, 'manifest.json');
-    await assertNoLinks(file, this.lang);
     const fileStat = pending ? markerStat : await statBigIntMaybe(file);
+    if (fileStat?.isSymbolicLink()) throw this.error('storage.symlinkNotSupported', { path: file });
     const cacheKey = `${gameId}/${id}`;
     const statSignature = fileStat
       ? `${pending ? 'p' : 'm'}:${fileStat.ino}:${fileStat.size}:${fileStat.mtimeNs}:${fileStat.ctimeNs}`
@@ -999,7 +1017,7 @@ export class SaveStore {
   async pruneRestorePoints(gameId) {
     try {
       await this.fault('before-retention', { gameId });
-      await pruneRestorePoints(this, gameId);
+      return await pruneRestorePoints(this, gameId);
     } catch (error) {
       // Retention is maintenance after commit, never a reason to roll back saves.
       await this.logger.warn('prune-deferred', {
@@ -1007,6 +1025,7 @@ export class SaveStore {
         gameId,
         error: /** @type {Error} */ (error).message,
       });
+      return { movedCount: 0, purgedCount: 0 };
     }
   }
 
@@ -1020,50 +1039,9 @@ export class SaveStore {
 
   /**
    * @param {any} journal
-   * @param {string} journalFile
-   */
-  async rollback(journal, journalFile) {
-    return restore_transaction.rollback(this, journal, journalFile);
-  }
-
-  async recoverTransactions() {
-    return restore_transaction.recoverTransactions(this);
-  }
-
-  /**
-   * @param {any} journal
-   */
-  importReplacementPaths(journal) {
-    return snapshot_import.importReplacementPaths(this, journal);
-  }
-
-  /**
-   * @param {any} journal
    */
   async finishImportReplacement(journal) {
     return snapshot_import.finishImportReplacement(this, journal);
-  }
-
-  /**
-   * @param {string} gameId
-   * @param {import('./models').Manifest} original
-   * @param {string} stage
-   * @param {string} token
-   */
-  async replaceImportedSnapshot(gameId, original, stage, token) {
-    return snapshot_import.replaceImportedSnapshot(this, gameId, original, stage, token);
-  }
-
-  async recoverImportReplacements() {
-    return snapshot_import.recoverImportReplacements(this);
-  }
-
-  /**
-   * @param {any} candidate
-   * @param {any[]} snapshots
-   */
-  importMatches(candidate, snapshots) {
-    return snapshot_import.importMatches(this, candidate, snapshots);
   }
 
   /**
@@ -1106,23 +1084,6 @@ export class SaveStore {
     return snapshot_import.executeImportPlan(this, planId, decisions);
   }
 
-  /**
-   * @param {import('./models').InternalImportPlan} plan
-   * @param {import('../shared/contracts').ImportDecision[]} decisions
-   */
-  async validateImportPlan(plan, decisions) {
-    return snapshot_import.validateImportPlan(this, plan, decisions);
-  }
-
-  /**
-   * @param {import('./models').InternalImportPlan} plan
-   * @param {import('./models').ImportChoices} choices
-   * @param {import('./models').StoredGame} game
-   */
-  async applyImportPlan(plan, choices, game) {
-    return snapshot_import.applyImportPlan(this, plan, choices, game);
-  }
-
   // Non-interactive callers retain the conservative default of skipping duplicates.
   // The desktop UI always uses prepareImport + explicit per-item decisions.
   /**
@@ -1140,30 +1101,6 @@ export class SaveStore {
    */
   async exportSnapshot(gameId, id, destination) {
     return snapshot_export.exportSnapshot(this, gameId, id, destination);
-  }
-
-  /**
-   * @param {string} root
-   * @param {string} [onlyFolder]
-   */
-  async exportIndexCandidates(root, onlyFolder) {
-    return snapshot_export.exportIndexCandidates(this, root, onlyFolder);
-  }
-
-  /**
-   * @param {string} directory
-   */
-  async namedExportCandidates(directory) {
-    return snapshot_export.namedExportCandidates(this, directory);
-  }
-
-  /**
-   * @param {string} gameId
-   * @param {import('./models').Manifest} meta
-   * @param {string} folder
-   */
-  async writeExport(gameId, meta, folder) {
-    return snapshot_export.writeExport(this, gameId, meta, folder);
   }
 
   /**

@@ -53,6 +53,7 @@ export class Logger {
     this.entries = [];
     /** @type {{ line: string; bytes: number; file: string; time: string; sequence: number }[]} */
     this.records = [];
+    this.unsorted = false;
     this.totalBytes = 0;
     this.sequence = 0;
     this.loaded = false;
@@ -79,6 +80,10 @@ export class Logger {
       sequence,
       file: path.join(this.logDir, entry.level, `${entry.operation}.jsonl`),
     };
+    const previous = this.records.at(-1);
+    if (previous && (record.time < previous.time || (record.time === previous.time && record.sequence < previous.sequence))) {
+      this.unsorted = true;
+    }
     this.records.push(record);
     this.totalBytes += record.bytes;
     return record;
@@ -139,10 +144,18 @@ export class Logger {
     this.loaded = true;
   }
 
-  /** @param {Set<string>} affected */
-  trim(affected) {
-    this.records.sort((a, b) => a.time.localeCompare(b.time) || a.sequence - b.sequence);
-    while (this.totalBytes > this.maxBytes && this.records.length) {
+  /** @param {Set<string>} affected @param {number} [targetBytes] */
+  trim(affected, targetBytes = this.maxBytes) {
+    if (this.unsorted) {
+      this.records.sort((a, b) => a.time.localeCompare(b.time) || a.sequence - b.sequence);
+      this.unsorted = false;
+    }
+    if (this.totalBytes <= this.maxBytes) return;
+    const floor = Math.min(this.maxBytes, Math.max(0, targetBytes));
+    while (
+      this.records.length &&
+      (this.totalBytes > this.maxBytes || (this.totalBytes > floor && this.records.length > 1))
+    ) {
       const oldest = this.records.shift();
       if (!oldest) break;
       this.totalBytes -= oldest.bytes;
@@ -188,6 +201,7 @@ export class Logger {
       this.lastError = String(error);
       this.loaded = false;
       this.records = [];
+      this.unsorted = false;
       this.totalBytes = 0;
     });
     return update;
@@ -215,18 +229,26 @@ export class Logger {
         if (!(await fs.stat(this.dataDir)).isDirectory()) return;
         await this.load();
         const record = this.appendRecord(entry);
-        this.entries.push(JSON.parse(record.line));
-        if (this.entries.length > 500) this.entries.shift();
-        await assertNoLinks(record.file);
-        await fs.mkdir(path.dirname(record.file), { recursive: true });
-        await fs.appendFile(record.file, record.line, 'utf8');
         const affected = new Set();
-        this.trim(affected);
+        if (this.totalBytes > this.maxBytes) {
+          this.trim(affected, Math.floor(this.maxBytes * 0.85));
+        }
+        const retained = this.records.includes(record);
+        if (retained) {
+          this.entries.push(JSON.parse(record.line));
+          if (this.entries.length > 500) this.entries.shift();
+        }
+        if (retained && !affected.has(record.file)) {
+          await assertNoLinks(record.file);
+          await fs.mkdir(path.dirname(record.file), { recursive: true });
+          await fs.appendFile(record.file, record.line, 'utf8');
+        }
         if (affected.size) await this.rewrite(affected);
       } catch (error) {
         if (!missing(error)) this.lastError = String(error);
         this.loaded = false;
         this.records = [];
+        this.unsorted = false;
         this.totalBytes = 0;
       }
     });

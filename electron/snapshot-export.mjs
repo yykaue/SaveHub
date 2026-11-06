@@ -79,8 +79,8 @@ export async function exportIndexCandidates(store, root, onlyFolder) {
 export async function namedExportCandidates(store, directory) {
   // A single named folder can contain arbitrary game files named manifest.json or collection.json.
   return (
-    (await store.exportIndexCandidates(path.dirname(directory), path.basename(directory))) ||
-    (await store.exportIndexCandidates(directory))
+    (await exportIndexCandidates(store, path.dirname(directory), path.basename(directory))) ||
+    (await exportIndexCandidates(store, directory))
   );
 }
 
@@ -97,6 +97,7 @@ export async function writeExport(store, gameId, meta, folder) {
     folder,
     meta.records,
     progressRange(store.onProgress, 0, 80),
+    store.lang,
   );
   store.onProgress({ phase: 'checking', detail: meta.label, completed: 0, percent: 80 });
   const copy = await inventory(folder, meta.entries, {
@@ -151,13 +152,16 @@ export async function exportSnapshots(store, gameId, selection, destination) {
     const existing = new Set((await fs.readdir(destination)).map(foldedName));
     // Old unwrapped exports may retain index entries after a named folder is moved.
     // Reserve those names so importing the new bundle cannot resolve to an old entry.
-    for (const candidate of (await store.exportIndexCandidates(destination)) || []) {
+    for (const candidate of (await exportIndexCandidates(store, destination)) || []) {
       existing.add(foldedName(path.basename(candidate.exported)));
     }
-    const folder = path.join(destination, uniqueExportName(`${exportName(game.name)}-存档导出`, existing));
+    const folder = path.join(
+      destination,
+      uniqueExportName(`${exportName(game.name, store.lang)}-${store.t('storage.snapshotExportSuffix')}`, existing),
+    );
     const indexDir = path.join(folder, EXPORT_INDEX);
     const taken = new Set([EXPORT_INDEX]);
-    const directories = metas.map((meta) => uniqueExportName(exportName(meta.label), taken));
+    const directories = metas.map((meta) => uniqueExportName(exportName(meta.label, store.lang), taken));
     const published = [];
     const indexFile = path.join(indexDir, `${batchId}.json`);
     let folderCreated = false;
@@ -170,7 +174,7 @@ export async function exportSnapshots(store, gameId, selection, destination) {
           meta.label,
           20 + (70 * index) / metas.length,
           20 + (70 * (index + 1)) / metas.length,
-          () => store.writeExport(gameId, meta, path.join(stage, directories[index])),
+          () => writeExport(store, gameId, meta, path.join(stage, directories[index])),
         );
       }
       // Claim a fresh bundle only after all payloads are verified. Never replace

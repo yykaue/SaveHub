@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { SaveStore, atomicJson, within } from '../electron/storage.mjs';
-import { assertDiskSpace, assertDiskBudgets, withinOnDisk } from '../electron/fs-utils.mjs';
+import { assertDiskSpace, assertDiskBudgets, exportName, withinOnDisk } from '../electron/fs-utils.mjs';
 import { Logger, MAX_LOG_BYTES } from '../electron/logger.mjs';
 import { validArguments, IPC_SCHEMA } from '../shared/ipc-schema.mjs';
 import { publicIcon, iconResponse } from '../electron/game-icons.mjs';
@@ -119,6 +119,19 @@ test('IPC contracts reject malformed arguments before dispatch and accept zero r
   ])
     assert(!validArguments('setRestorePointRetention', args));
   assert(!validArguments('updateSnapshot', ['game', 'id', { protected: 'yes' }]));
+  assert(!validArguments('saveSnapshot', ['game', { label: 'save', protected: true }]));
+  assert(validArguments('saveSnapshot', ['game', { label: 'save', note: 'note' }]));
+  assert(!validArguments('updateSnapshots', ['game', 'all', { label: 'invalid-batch-field' }]));
+  assert(validArguments('updateSnapshots', ['game', 'all', { protected: true }]));
+  assert(
+    validArguments('saveGame', [
+      {
+        name: 'Game',
+        locations: { win32: { root: 'C:/saves', items: ['a'] }, darwin: { root: '/saves', items: ['a'] } },
+      },
+    ]),
+  );
+  assert(!validArguments('saveGame', [{ name: 'Game', locations: { win32: { root: 'C:/saves', items: [123] } } }]));
   assert(!validArguments('deleteSnapshots', ['../outside', ['record']]));
   assert(!validArguments('state', [true]));
   assert(validArguments('removeGame', ['game']));
@@ -475,6 +488,9 @@ test('existing path containment uses filesystem identity', async (t) => {
   const f = await fixture(t);
   assert(await withinOnDisk(f.base, path.join(f.source, 'save.dat')));
   assert(!(await withinOnDisk(f.source, f.store.dataDir)));
+  const pendingRoot = path.join(f.base, 'non-existent-root');
+  assert(await withinOnDisk(pendingRoot, path.join(pendingRoot, 'sub', 'save.dat')));
+  assert(!(await withinOnDisk(pendingRoot, path.join(f.base, 'source', 'save.dat'))));
   if (process.platform === 'win32') assert(await withinOnDisk(f.source.toUpperCase(), path.join(f.source, 'save.dat')));
 });
 
@@ -535,4 +551,55 @@ test('legacy logs migrate into the shared budget and failed log writes never rej
   await fs.writeFile(blocked, 'file');
   const bad = new Logger(blocked);
   assert.equal(await bad.run('restore', async () => 42), 42);
+});
+
+test('blocked games preserve ready pathStatus in state while blocking all game and import mutations', async (t) => {
+  const f = await fixture(t);
+  const snap = await f.store.createSnapshot(f.id, { label: 'initial' });
+  const exportDir = path.join(f.base, 'exports');
+  await fs.mkdir(exportDir);
+  const snapExport = await f.store.exportSnapshots(f.id, [snap.id], exportDir);
+  const gameExport = await f.store.exportGames([f.id], exportDir, true);
+
+  f.store.blockedGames.add(f.id);
+  const state = await f.store.state();
+  const gameState = state.games.find((g) => g.id === f.id);
+  assert.equal(gameState.pathStatus, 'ready');
+  assert.equal(gameState.recoveryBlocked, true);
+
+  await assert.rejects(f.store.createSnapshot(f.id, { label: 'blocked' }), { code: 'storage.gameRecoveryBlocked' });
+  await assert.rejects(f.store.restoreSnapshot(f.id, snap.id), { code: 'storage.gameRecoveryBlocked' });
+  await assert.rejects(f.store.removeGame(f.id, false, false), { code: 'storage.gameRecoveryBlocked' });
+  await assert.rejects(f.store.removeGame(f.id, false, true), { code: 'storage.gameRecoveryBlocked' });
+  await assert.rejects(f.store.prepareImport(f.id, snapExport.folder), { code: 'storage.gameRecoveryBlocked' });
+
+  const gamePlan = await f.store.prepareGameImport(gameExport.folder);
+  await assert.rejects(
+    f.store.reviewGameImport(gamePlan.id, [{ itemId: gamePlan.items[0].id, action: 'overwrite', targetId: f.id }]),
+    { code: 'storage.gameRecoveryBlocked' },
+  );
+});
+
+test('English locale localizes export folder names and import report includes retention prune statistics', async (t) => {
+  const f = await fixture(t);
+  await f.store.setLanguage('en');
+  assert.equal(exportName('...', 'en'), 'Unnamed Save');
+  const exportDir = path.join(f.base, 'exports-en');
+  await fs.mkdir(exportDir);
+  const p1 = await f.safety(0);
+  const p2 = await f.safety(1);
+  const snapExport = await f.store.exportSnapshots(f.id, [p1.id, p2.id], exportDir);
+  assert(path.basename(snapExport.folder).includes('Save Export'));
+  const gameExport = await f.store.exportGames([f.id], exportDir, false);
+  assert(path.basename(gameExport.folder).includes('Game Export'));
+
+  const target = await new SaveStore(path.join(f.base, 'target-en')).init();
+  t.after(async () => {
+    await target.logger.queue;
+  });
+  await target.setRestorePointRetention({ active: 1, removed: 0 });
+  const targetGameId = await target.upsertGame(f.input);
+  const plan = await target.prepareImport(targetGameId, snapExport.folder);
+  const report = await target.executeImport(plan.id, []);
+  assert.deepEqual(report.pruned, { movedCount: 1, purgedCount: 1 });
 });

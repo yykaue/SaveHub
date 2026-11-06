@@ -1,4 +1,5 @@
 import { AppError } from './errors.mjs';
+import { translate } from './i18n.mjs';
 import path from 'node:path';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -104,20 +105,77 @@ export function within(root, target, platform = process.platform) {
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
 }
 
+/**
+ * @param {string} target
+ */
+async function resolveExistingAncestor(target) {
+  let current = path.resolve(target).normalize('NFC');
+  /** @type {string[]} */
+  const tail = [];
+  while (true) {
+    const stat = await statMaybe(current);
+    if (stat) return { dir: current, stat, tail };
+    const parent = path.dirname(current);
+    if (parent === current) return { dir: current, stat: null, tail };
+    tail.unshift(path.basename(current));
+    current = parent;
+  }
+}
+
+/**
+ * @param {string} dirPath
+ * @param {import('node:fs').Stats} dirStat
+ * @param {string} platform
+ */
+async function isCaseInsensitiveDir(dirPath, dirStat, platform) {
+  if (platform === 'win32') return true;
+  if (platform !== 'darwin') return false;
+  let current = dirPath;
+  let currentStat = dirStat;
+  while (true) {
+    const base = path.basename(current);
+    const flipped = base !== base.toLowerCase() ? base.toLowerCase() : base.toUpperCase();
+    if (flipped !== base) {
+      const alt = await statMaybe(path.join(path.dirname(current), flipped));
+      return Boolean(alt && alt.dev === currentStat.dev && alt.ino === currentStat.ino);
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return true;
+    const parentStat = await statMaybe(parent);
+    if (!parentStat) return true;
+    current = parent;
+    currentStat = parentStat;
+  }
+}
+
 /** Resolve existing path identity on the actual volume, including case aliases.
  * @param {string} root @param {string} target @param {string} [platform]
  */
 export async function withinOnDisk(root, target, platform = process.platform) {
   const rootStat = await statMaybe(root);
-  if (!rootStat) return within(root, target, platform);
-  let current = path.resolve(target);
-  while (true) {
-    const stat = await statMaybe(current);
-    if (stat && stat.dev === rootStat.dev && stat.ino === rootStat.ino) return true;
-    const parent = path.dirname(current);
-    if (parent === current) return false;
-    current = parent;
+  if (rootStat) {
+    let current = path.resolve(target);
+    while (true) {
+      const stat = await statMaybe(current);
+      if (stat && stat.dev === rootStat.dev && stat.ino === rootStat.ino) return true;
+      const parent = path.dirname(current);
+      if (parent === current) return false;
+      current = parent;
+    }
   }
+  const rootResolved = await resolveExistingAncestor(root);
+  const targetResolved = await resolveExistingAncestor(target);
+  if (!rootResolved.stat || !targetResolved.stat) return within(root, target, platform);
+  if (
+    targetResolved.stat.dev !== rootResolved.stat.dev ||
+    targetResolved.stat.ino !== rootResolved.stat.ino ||
+    targetResolved.tail.length < rootResolved.tail.length
+  ) {
+    return false;
+  }
+  const fold = await isCaseInsensitiveDir(rootResolved.dir, rootResolved.stat, platform);
+  const norm = /** @param {string} seg */ (seg) => (fold ? seg.normalize('NFC').toLowerCase() : seg.normalize('NFC'));
+  return rootResolved.tail.every((segment, index) => norm(segment) === norm(targetResolved.tail[index] || ''));
 }
 
 /** @param {{ directory: string; bytes: number }[]} budgets @param {string} [lang] */
@@ -365,26 +423,51 @@ export const fingerprint = (value) => createHash('sha256').update(signature(valu
  * @param {string} target
  * @param {import('./models').FileRecord[]} records
  * @param {(p: any) => void} [progress]
+ * @param {string} [lang]
  */
-export async function copyRecords(source, target, records, progress = () => {}) {
+export async function copyRecords(source, target, records, progress = () => {}, lang) {
   const copied = records.map((record) => ({ ...record }));
-  await fs.mkdir(target, { recursive: true });
+  const resolvedSource = path.resolve(source);
+  const resolvedTarget = path.resolve(target);
+  await assertNoLinks(resolvedSource, lang);
+  await assertNoLinks(resolvedTarget, lang);
+  await fs.mkdir(resolvedTarget, { recursive: true });
+  const createdDirs = new Set([resolvedTarget]);
+  const checkedSourceDirs = new Set([resolvedSource]);
   const dirs = records.filter((record) => record.type === 'directory').sort((a, b) => a.path.length - b.path.length);
-  for (const record of dirs) await fs.mkdir(path.join(target, record.path), { recursive: true });
+  for (const record of dirs) {
+    const dir = path.resolve(resolvedTarget, record.path);
+    await fs.mkdir(dir, { recursive: true });
+    createdDirs.add(dir);
+  }
   const files = copied.filter((record) => record.type === 'file');
   const totalBytes = files.reduce((sum, record) => sum + (record.size || 0), 0);
   let copiedBytes = 0;
   let completed = 0;
   for (const record of files) {
-    const dest = path.join(target, record.path);
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    const origin = path.join(source, record.path);
-    await assertNoLinks(origin);
+    const dest = path.join(resolvedTarget, record.path);
+    const destDir = path.dirname(dest);
+    if (!createdDirs.has(destDir)) {
+      await fs.mkdir(destDir, { recursive: true });
+      createdDirs.add(destDir);
+    }
+    const origin = path.join(resolvedSource, record.path);
+    const originDir = path.dirname(origin);
+    if (!checkedSourceDirs.has(originDir)) {
+      await assertNoLinks(originDir, lang);
+      let currentDir = originDir;
+      while (currentDir !== resolvedSource && currentDir !== path.dirname(currentDir)) {
+        checkedSourceDirs.add(currentDir);
+        currentDir = path.dirname(currentDir);
+      }
+    }
+    const originStat = await statMaybe(origin);
+    if (originStat?.isSymbolicLink()) throw new AppError('storage.symlinkNotSupported', { path: origin }, lang);
     const input = await fs.open(origin, 'r');
     try {
       const before = await input.stat();
       if (!before.isFile() || before.size !== record.size) {
-        throw new AppError('storage.fileChanging', { path: record.path }, undefined);
+        throw new AppError('storage.fileChanging', { path: record.path }, lang);
       }
       const output = await fs.open(dest, 'wx');
       const hash = createHash('sha256');
@@ -416,7 +499,7 @@ export async function copyRecords(source, target, records, progress = () => {}) 
         before.mtimeMs !== current.mtimeMs ||
         (record.sha256 && record.sha256 !== digest)
       ) {
-        throw new AppError('storage.fileChanging', { path: record.path }, undefined);
+        throw new AppError('storage.fileChanging', { path: record.path }, lang);
       }
       record.sha256 = digest;
     } finally {
@@ -434,7 +517,7 @@ export async function copyRecords(source, target, records, progress = () => {}) 
   }
   for (const record of dirs.reverse()) {
     const date = new Date(record.mtimeMs);
-    await fs.utimes(path.join(target, record.path), date, date);
+    await fs.utimes(path.join(resolvedTarget, record.path), date, date);
   }
   return copied;
 }
@@ -518,8 +601,9 @@ export const publicSnapshot = ({ records, ...snapshot }) => snapshot;
 
 /**
  * @param {string} label
+ * @param {string} [lang]
  */
-export function exportName(label) {
+export function exportName(label, lang) {
   let name = label
     .normalize('NFC')
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
@@ -527,7 +611,7 @@ export function exportName(label) {
     .replace(/[. ]+$/g, '');
   // Leave room for collision suffixes on filesystems with a 255-byte name limit.
   while (Buffer.byteLength(name, 'utf8') > 180) name = Array.from(name).slice(0, -1).join('');
-  name = name.replace(/[. ]+$/g, '') || '未命名存档';
+  name = name.replace(/[. ]+$/g, '') || translate(lang, 'storage.unnamedExport');
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name) || name.toLowerCase().startsWith('.savehub-export'))
     name = `_${name}`;
   return name;

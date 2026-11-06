@@ -83,8 +83,6 @@
     "listView": "列表视图",
     "headingTitle": "你的世界，都在这里。",
     "headingDesc": "每个游戏独立管理，让不同的冒险各得其所。",
-    "sectionTitle": "游戏项目",
-    "editGameAria": "编辑 {name}",
     "statusReady": "存档目录已连接",
     "statusRequired": "需要配置存档路径",
     "openLibrary": "进入存档库",
@@ -190,8 +188,6 @@
     "safetyRollbackDesc": "文件替换失败时回滚，中途退出后会在下次启动恢复。",
     "removedGamesTitle": "已移除的游戏",
     "removedGamesDesc": "已移除游戏的找回、彻底删除和清理重试统一在「全部游戏」中管理。",
-    "restoreGameProject": "找回项目",
-    "noRemovedGames": "暂时没有已移除的游戏。",
     "openLogs": "打开日志目录",
     "logsDesc": "按类型和操作分类记录，全部日志共用容量上限，默认 20 MB（1 MB = 1,048,576 字节）。超出容量时自动淘汰最早记录。",
     "manageRemovedGames": "管理已移除的游戏"
@@ -214,6 +210,7 @@
     "tabScopeDesc": "「{tab}」标签页的全部 {count} 份存档，不受搜索影响",
     "batchSelectedPrefix": "已选 ",
     "batchSelectedSuffix": " 份",
+    "batchCrossPageHint": "（跨 {pages} 页）",
     "batchProtectedTrashHint": " · 含保护存档，需找回并取消保护后才能删除",
     "batchProtectedHint": " · 含保护存档，删除前需取消保护",
     "batchIdleTrashHint": "勾选存档，可批量找回、永久删除或导出",
@@ -317,8 +314,6 @@
     "retentionAfterImport": "整批导入完成后，将按恢复点保留数量整理，超额记录可能被移除或永久删除。",
     "protectedOverwriteHint": "本地记录已受保护，不能覆盖。请选择跳过或两者并存。",
     "tagProtected": " · 已保护",
-    "tagTrash": " · 回收站",
-    "tagRestorePoint": " · 读档恢复点",
     "tagPurgePending": " · 永久删除未完成",
     "actionOverwrite": "覆盖",
     "actionSkip": "跳过",
@@ -352,6 +347,7 @@
     "resultSkipped": "已跳过",
     "resultFailed": "未能导入",
     "resultDesc": "导入源文件已保留。新导入、覆盖和并存的存档可在时光轴中查看。",
+    "retentionPrunedNotice": "按当前恢复点保留上限，已自动移入已移除队列 {movedCount} 份，自动永久清理 {purgedCount} 份超额恢复点。",
     "doneBtn": "完成"
   },
   "modals": {
@@ -366,7 +362,6 @@
       "restore": "回到这个游戏时刻",
       "deletePermanent": "永久删除存档",
       "deleteSoft": "移除存档",
-      "removeGame": "移除游戏项目",
       "detail": "存档详情",
       "restorePoints": "读档恢复点",
       "batchReport": "批量操作结果",
@@ -378,11 +373,6 @@
       "summary": "已完成 {updated} 份，未完成 {failed} 份。",
       "permanentDesc": "部分文件可能已被删除；标记为“永久删除未完成”的记录只能继续清理，不能找回。",
       "softDesc": "未完成的项目保留原状，可根据下列原因处理后重试。"
-    },
-    "removeGame": {
-      "question": "移除「{name}」这个游戏项目？",
-      "desc": "现有备份会保留，可在「设置与关于 → 已移除的游戏」中找回。游戏原文件不受影响。",
-      "confirmBtn": "移除游戏"
     },
     "detail": {
       "emptyNote": "这份存档还没有添加备注。",
@@ -537,9 +527,7 @@
     "updatedSnapshotToast": "存档信息已更新。",
     "createdSnapshotToast": "新存档已创建，文件校验通过。",
     "restoringSnapshot": "正在安全恢复存档",
-    "restoredSnapshotToast": "已读取「{label}」，原进度已保存为读档恢复点。",
-    "removingGameProject": "移除游戏项目",
-    "removedGameToast": "游戏项目已移除，备份仍然保留。"
+    "restoredSnapshotToast": "已读取「{label}」，原进度已保存为读档恢复点。"
   },
   "format": {
     "kinds": {
@@ -654,7 +642,6 @@
     "restoreAborted": "读档未完成，原存档已保留或恢复。{error}",
     "invalidJournalPaths": "恢复日志路径无效，未操作任何游戏文件",
     "invalidJournalEntry": "恢复日志项目无效",
-    "invalidTransactionStage": "事务目录无效",
     "recoveredInterruptedRestore": "已恢复上次意外中断的读档操作，原游戏存档已还原。",
     "quarantinedCorruptJournal": "发现损坏的恢复事务日志（{name}），已隔离保留供排查。",
     "invalidImportReplaceJournal": "导入覆盖事务无效。",
@@ -689,16 +676,17 @@
     "pickExportDirRequired": "请选择导出目录。",
     "exportDirInsideVault": "请选择 SaveHub 资料库以外的导出目录。",
     "exportCleanupOutOfBounds": "导出清理目录越界。",
-    "exportStageOutOfBounds": "导出暂存目录越界。",
+    "unnamedExport": "未命名存档",
+    "snapshotExportSuffix": "存档导出",
     "diskSpaceUnavailable": "无法读取磁盘可用空间：{error}",
     "gameRecoveryBlocked": "此游戏存在尚未解决的恢复事务，暂时不可修改。请打开日志目录排查并在修复后重启。",
     "recoveryReadFailed": "无法读取恢复日志，原文件保留：{file}",
     "quarantineFailed": "损坏的恢复日志 {name} 隔离失败，原文件仍保留在 {file}。",
     "recoveryIncomplete": "事务恢复未完成，现场和日志已保留：{file}；{error}",
-    "libraryRecoveryAvailable": "资料库损坏，原文件已保留。可以从上一份有效配置恢复。",
     "libraryRecovered": "已从上一份配置恢复。损坏配置副本保存在 {file}。"
   },
   "gameTransfer": {
+    "gameExportSuffix": "游戏导出",
     "gameNameLength": "游戏名称需要 1–80 个字符。",
     "invalidGameRoot": "游戏根目录无效。",
     "invalidGameIconFormat": "请使用 PNG、JPEG 或 WebP 图标。",
@@ -715,7 +703,6 @@
     "cannotExportGamesIntoVault": "请选择 SaveHub 资料库以外的导出目录。",
     "maxSingleGameSnapshotsExport": "单个游戏一次最多导出 10,000 份存档记录。",
     "gameExportCleanupOutOfBounds": "游戏导出清理目录越界。",
-    "gameExportStageOutOfBounds": "游戏导出暂存目录越界。",
     "gameConfigFileTooLarge": "游戏配置文件过大。",
     "invalidGameExportFormat": "游戏导出格式无效。",
     "invalidBundleSnapshotCount": "游戏包的存档数量无效。",
@@ -751,6 +738,8 @@
   "progress": {
     "checking": "正在检查并校验文件",
     "copying": "正在复制文件",
+    "restoring": "正在还原存档文件",
+    "deleting": "正在永久删除存档",
     "importing": "正在导入记录",
     "exporting": "正在导出记录",
     "pruning": "正在整理恢复点保留数量",

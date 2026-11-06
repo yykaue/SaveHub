@@ -18,6 +18,18 @@ import {
 
 import { recoverJournals, validateRestoreJournal } from './recovery.mjs';
 
+const stageSignature = (/** @type {{ absent: string[]; records: any[] }} */ value) =>
+  JSON.stringify({
+    absent: value.absent,
+    records: value.records.map(({ path: file, type, size }) => ({ path: file, type, size })),
+  });
+
+const metadataSignature = (/** @type {{ absent: string[]; records: any[] }} */ value) =>
+  JSON.stringify({
+    absent: value.absent,
+    records: value.records.map(({ path: file, type, size, mtimeMs }) => ({ path: file, type, size, mtimeMs })),
+  });
+
 /**
  * @param {import('./storage.mjs').SaveStore} store
 
@@ -27,6 +39,7 @@ import { recoverJournals, validateRestoreJournal } from './recovery.mjs';
 export async function restoreSnapshot(store, gameId, id) {
   return store.exclusive(async () => {
     const game = store.game(gameId);
+    store.assertGameWritable(gameId);
     const meta = await store.verify(gameId, id);
     if (meta.deletedAt) throw store.error('storage.recoverBeforeRestore');
     const { root, entries } = await store.location(game);
@@ -46,6 +59,8 @@ export async function restoreSnapshot(store, gameId, id) {
       note: store.t('storage.beforeRestoreNote'),
       kind: 'safety',
       allowMissing: true,
+      initialSource: currentSize,
+      skipDiskCheck: true,
     });
     const transactionId = randomUUID();
     const stage = path.join(root, `.savehub-restore-${transactionId}`);
@@ -72,13 +87,18 @@ export async function restoreSnapshot(store, gameId, id) {
         path.join(stage, 'next'),
         meta.records,
         store.onProgress,
+        store.lang,
       );
-      const staged = await inventory(path.join(stage, 'next'), entries, { allowMissing: true, lang: store.lang });
-      if (signature(staged) !== signature(meta)) {
+      const staged = await inventory(path.join(stage, 'next'), entries, {
+        allowMissing: true,
+        hash: false,
+        lang: store.lang,
+      });
+      if (stageSignature(staged) !== stageSignature(meta)) {
         throw store.error('storage.restoreStageVerifyFailed');
       }
-      const current = await inventory(root, entries, { allowMissing: true, lang: store.lang });
-      if (signature(current) !== signature(safety)) {
+      const current = await inventory(root, entries, { allowMissing: true, hash: false, lang: store.lang });
+      if (metadataSignature(current) !== metadataSignature(safety)) {
         throw store.error('storage.liveChangedBeforeRestore');
       }
       journal.status = 'applying';
@@ -141,7 +161,7 @@ export async function restoreSnapshot(store, gameId, id) {
       }
       if (journalWritten) {
         try {
-          await store.rollback(journal, journalFile);
+          await rollback(store, journal, journalFile);
           await store.logger.warn('restore-rolled-back', { gameId, snapshotId: id, error: errMessage });
         } catch (rollbackError) {
           store.blockedGames.add(gameId);
@@ -233,7 +253,7 @@ export async function recoverTransactions(store) {
         await fs.rm(journal.stage, { recursive: true, force: true });
         await fs.rm(file, { force: true });
       } else {
-        await store.rollback(journal, file);
+        await rollback(store, journal, file);
         await store.logger.info('recovered-interrupted-restore', { operation: 'recovery', id: journal.id });
         store.recoveryMessages.push(store.t('storage.recoveredInterruptedRestore'));
       }

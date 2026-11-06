@@ -6,6 +6,8 @@ const id = (value) => typeof value === 'string' && /^[a-z0-9-]{1,64}$/.test(valu
 /** @type {Validator} */
 const bool = (value) => typeof value === 'boolean';
 /** @type {Validator} */
+const str = (value) => typeof value === 'string';
+/** @type {Validator} */
 const object = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 /** @type {Validator} */
 const count = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -20,12 +22,55 @@ const oneOf = (values) => (value) => typeof value === 'string' && values.include
 /** @type {Validator} */
 const selection = (value) => value === 'all' || ids(value);
 /** @type {Validator} */
+const platformLocation = (value) =>
+  object(value) &&
+  str(/** @type {{ root?: unknown }} */ (value).root) &&
+  list(str)(/** @type {{ items?: unknown }} */ (value).items);
+/** @type {Validator} */
+const partialRetention = (value) =>
+  object(value) &&
+  Object.entries(/** @type {Record<string, unknown>} */ (value)).every(
+    ([key, item]) => ['active', 'removed'].includes(key) && optional(count)(item),
+  );
+/** @type {Validator} */
+const gameInput = (value) => {
+  if (!object(value)) return false;
+  const item = /** @type {Record<string, unknown>} */ (value);
+  const locations = /** @type {Record<string, unknown>} */ (item.locations);
+  return (
+    optional(id)(item.id) &&
+    str(item.name) &&
+    optional(str)(item.subtitle) &&
+    optional(str)(item.icon) &&
+    optional(str)(item.color) &&
+    optional(str)(item.legacyRoot) &&
+    optional(partialRetention)(item.restorePointRetention) &&
+    object(locations) &&
+    platformLocation(locations.win32) &&
+    platformLocation(locations.darwin)
+  );
+};
+/** @type {Validator} */
+const snapshotInput = (value) => {
+  if (!object(value)) return false;
+  return Object.entries(/** @type {Record<string, unknown>} */ (value)).every(
+    ([key, item]) => ['label', 'note'].includes(key) && str(item),
+  );
+};
+/** @type {Validator} */
 const details = (value) => {
   if (!object(value)) return false;
   return Object.entries(/** @type {Record<string, unknown>} */ (value)).every(([key, item]) =>
     ['label', 'note'].includes(key)
       ? typeof item === 'string'
       : ['favorite', 'protected', 'deleted'].includes(key) && bool(item),
+  );
+};
+/** @type {Validator} */
+const batchDetails = (value) => {
+  if (!object(value)) return false;
+  return Object.entries(/** @type {Record<string, unknown>} */ (value)).every(
+    ([key, item]) => ['protected', 'deleted'].includes(key) && bool(item),
   );
 };
 /** @type {Validator} */
@@ -47,7 +92,7 @@ export const IPC_SCHEMA = {
       count(/** @type {{ active?: unknown }} */ (value).active) &&
       count(/** @type {{ removed?: unknown }} */ (value).removed),
   ],
-  saveGame: [object],
+  saveGame: [gameInput],
   removeGame: [id, optional(bool), optional(bool)],
   exportGames: [ids, optional(bool)],
   importGames: [],
@@ -64,10 +109,10 @@ export const IPC_SCHEMA = {
   cancelGameImport: [id],
   pickDirectory: [],
   pickIcon: [],
-  saveSnapshot: [id, details],
+  saveSnapshot: [id, snapshotInput],
   restoreSnapshot: [id, id],
   updateSnapshot: [id, id, details],
-  updateSnapshots: [id, selection, details],
+  updateSnapshots: [id, selection, batchDetails],
   deleteSnapshots: [id, ids],
   verifySnapshot: [id, id],
   importSnapshots: [id, optional(bool)],

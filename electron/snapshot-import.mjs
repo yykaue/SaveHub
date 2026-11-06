@@ -22,6 +22,7 @@ import {
 
 import { recoverJournals } from './recovery.mjs';
 import { progressTask } from './progress.mjs';
+import { namedExportCandidates } from './snapshot-export.mjs';
 
 /**
  * @param {import('./storage.mjs').SaveStore} store
@@ -55,7 +56,7 @@ export function importReplacementPaths(store, journal) {
  * @param {any} journal
     */
 export async function finishImportReplacement(store, journal) {
-  const { target, stage, previous, file } = store.importReplacementPaths(journal);
+  const { target, stage, previous, file } = importReplacementPaths(store, journal);
   for (const location of [target, stage, previous, file]) await assertNoLinks(location, store.lang);
   if (journal.status === 'prepared' && (await statMaybe(previous))) {
     if (await statMaybe(target)) {
@@ -90,7 +91,7 @@ export async function replaceImportedSnapshot(store, gameId, original, stage, to
     throw store.error('storage.importReplaceTargetForbidden');
   }
   const journal = { version: 1, token, gameId, id: original.id, status: 'prepared' };
-  const locations = store.importReplacementPaths(journal);
+  const locations = importReplacementPaths(store, journal);
   if (stage !== locations.stage) throw store.error('storage.importReplaceInvalidStage');
   await assertTreeNoLinks(locations.target, store.lang);
   if (await statMaybe(locations.previous)) throw store.error('storage.importReplaceBackupExists');
@@ -137,7 +138,7 @@ export async function recoverImportReplacements(store) {
     store,
     'import-transactions',
     (journal, file) => {
-      if (store.importReplacementPaths(journal).file !== file)
+      if (importReplacementPaths(store, journal).file !== file)
         throw store.error('storage.importReplaceIdentityMismatch');
     },
     async (journal) => {
@@ -226,7 +227,10 @@ export function cancelImport(store, planId) {
    * @param {{ game?: import('./models').StoredGame; bundle?: boolean }} [options]
     */
 export async function prepareImportPlan(store, gameId, directory, { game = store.game(gameId), bundle = false } = {}) {
-  if (!bundle) store.pendingImport = null;
+  if (!bundle) {
+    store.assertGameWritable(game.id);
+    store.pendingImport = null;
+  }
   const entries = cleanItems(game.locations[store.platform]?.items || [], { allowEmpty: bundle, lang: store.lang });
   if (typeof directory !== 'string' || !path.isAbsolute(directory)) {
     throw store.error('storage.pickLegacyDirRequired');
@@ -247,7 +251,7 @@ export async function prepareImportPlan(store, gameId, directory, { game = store
   const existing = await store.snapshots(gameId, true);
   /** @type {any[]} */
   let candidates;
-  const namedExports = await store.namedExportCandidates(directory);
+  const namedExports = await namedExportCandidates(store, directory);
   if (namedExports) {
     candidates = namedExports;
   } else if (await statMaybe(collectionFile)) {
@@ -327,7 +331,7 @@ export async function prepareImportPlan(store, gameId, directory, { game = store
         fingerprint: fingerprint(data),
         bytes: data.records.reduce((total, record) => total + (record.size || 0), 0),
         fileCount: data.records.filter((record) => record.type === 'file').length,
-        matches: store.importMatches(candidate, existing),
+        matches: importMatches(store, candidate, existing),
       });
     } catch (error) {
       plan.failed.push({ name: candidate.name, error: /** @type {Error} */ (error).message });
@@ -359,11 +363,15 @@ export async function executeImportPlan(store, planId, decisions) {
   const plan = store.pendingImport;
   if (!plan || plan.id !== planId) throw store.error('storage.importPlanExpired');
   const game = store.game(plan.gameId);
-  const choices = await store.validateImportPlan(plan, decisions);
+  store.assertGameWritable(game.id);
+  const choices = await validateImportPlan(store, plan, decisions);
   store.pendingImport = null; // An execution token is single use, including partial failure.
-  const report = await progressTask(store, 'importing', '', 0, 95, () => store.applyImportPlan(plan, choices, game));
+  const report = await progressTask(store, 'importing', '', 0, 95, () => applyImportPlan(store, plan, choices, game));
   // Enforce both queues only after every import/overwrite/skip has finished.
-  await progressTask(store, 'pruning', '', 95, 100, () => store.pruneRestorePoints(game.id));
+  const pruned = await progressTask(store, 'pruning', '', 95, 100, () => store.pruneRestorePoints(game.id));
+  if (pruned && (pruned.movedCount || pruned.purgedCount)) {
+    report.pruned = pruned;
+  }
   return report;
 }
 
@@ -410,7 +418,7 @@ export async function validateImportPlan(store, plan, decisions) {
   store.invalidateGameCache(plan.gameId);
   const existing = await store.snapshots(plan.gameId, true);
   for (const item of plan.items) {
-    if (!equal(store.importMatches(item, existing), item.matches)) {
+    if (!equal(importMatches(store, item, existing), item.matches)) {
       throw store.error('storage.duplicateMatchesChanged');
     }
   }
@@ -427,7 +435,7 @@ export async function validateImportPlan(store, plan, decisions) {
 export async function applyImportPlan(store, plan, choices, game) {
   const existing = await store.snapshots(game.id, true);
   /**
-   * @type {{ imported: string[]; overwritten: string[]; keptBoth: string[]; skipped: string[]; failed: { name: string; error: string }[] }} */
+   * @type {import('../shared/contracts').ImportReport} */
   const report = { imported: [], overwritten: [], keptBoth: [], skipped: [], failed: [...plan.failed] };
   const names = new Set([
     ...existing.map((item) => foldedName(item.label)),

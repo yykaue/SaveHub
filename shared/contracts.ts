@@ -63,8 +63,9 @@ export interface AppState {
   restorePointRetention: RestorePointRetention;
   logLimitMB: number;
 }
+export type ProgressPhase = 'checking' | 'copying' | 'restoring' | 'deleting' | 'importing' | 'exporting' | 'pruning';
 export interface Progress {
-  phase: string;
+  phase: ProgressPhase;
   detail: string;
   completed: number;
   total?: number;
@@ -97,6 +98,7 @@ export interface ImportReport {
   keptBoth: string[];
   skipped: string[];
   failed: { name: string; error: string }[];
+  pruned?: { movedCount: number; purgedCount: number };
 }
 export interface BatchReport {
   updated: string[];

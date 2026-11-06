@@ -24,6 +24,8 @@ import {
 import { normalizeRetention } from './retention.mjs';
 import { publicIcon } from './game-icons.mjs';
 import { progressTask } from './progress.mjs';
+import { exportIndexCandidates, writeExport } from './snapshot-export.mjs';
+import { applyImportPlan, importReplacementPaths, validateImportPlan } from './snapshot-import.mjs';
 
 const digest = (/** @type {string} */ text) => createHash('sha256').update(text).digest('hex');
 const emptyReport = () => ({
@@ -131,6 +133,7 @@ export async function purgeGameSnapshots(store, id) {
  */
 export async function purgeGame(store, id) {
   const game = store.game(id, true);
+  store.assertGameWritable(id);
   if (!game.deletedAt || !game.purgeGamePending) throw store.error('gameTransfer.gamePurgeNotConfirmed');
   const directory = path.resolve(store.gameDir(id));
   if (
@@ -166,7 +169,8 @@ async function gameImportJournals(store, gameId) {
     await assertNoLinks(file, store.lang);
     const journal = JSON.parse(await fs.readFile(file, 'utf8'));
     if (journal.gameId !== gameId) continue;
-    if (store.importReplacementPaths(journal).file !== file) throw store.error('storage.importReplaceIdentityMismatch');
+    if (importReplacementPaths(store, journal).file !== file)
+      throw store.error('storage.importReplaceIdentityMismatch');
     result.push(file);
   }
   return result;
@@ -183,6 +187,7 @@ export async function removeGame(store, id, undo, deleteRecords) {
     throw store.error('gameTransfer.invalidGameDeleteOptions');
   }
   const game = store.game(id, true);
+  store.assertGameWritable(id);
   const pending = game.purgeGamePending || game.purgeSnapshotsPending;
   if (undo && pending) throw store.error('gameTransfer.cannotUndoPendingPurge');
   if (pending && !deleteRecords) throw store.error('gameTransfer.mustRetryPendingPurge');
@@ -222,7 +227,10 @@ export async function exportGames(store, ids, destination, includeSnapshots) {
   const names = new Set((await fs.readdir(destination)).map(foldedName));
   const folder = path.join(
     destination,
-    uniqueExportName(`${games.length === 1 ? exportName(games[0].name) : 'SaveHub'}-游戏导出`, names),
+    uniqueExportName(
+      `${games.length === 1 ? exportName(games[0].name, store.lang) : 'SaveHub'}-${store.t('gameTransfer.gameExportSuffix')}`,
+      names,
+    ),
   );
   const stage = path.join(destination, `.savehub-games-${randomUUID()}`);
   const directories = /** @type {string[]} */ ([]),
@@ -240,7 +248,7 @@ export async function exportGames(store, ids, destination, includeSnapshots) {
         (90 * gameIndex) / games.length,
         (90 * (gameIndex + 1)) / games.length,
         async () => {
-          const directory = uniqueExportName(exportName(game.name), taken);
+          const directory = uniqueExportName(exportName(game.name, store.lang), taken);
           directories.push(directory);
           const target = path.join(stage, directory);
           const config = normalizeGame(game, { id: game.id, createdAt: game.createdAt }, store.lang);
@@ -269,9 +277,9 @@ export async function exportGames(store, ids, destination, includeSnapshots) {
                   const meta = await progressTask(store, 'checking', '', 0, 20, () =>
                     store.verify(game.id, snapshot.id),
                   );
-                  const name = uniqueExportName(exportName(meta.label), used);
+                  const name = uniqueExportName(exportName(meta.label, store.lang), used);
                   await progressTask(store, 'exporting', '', 20, 100, () =>
-                    store.writeExport(game.id, meta, path.join(target, 'snapshots', name)),
+                    writeExport(store, game.id, meta, path.join(target, 'snapshots', name)),
                   );
                   records.push({ directory: name, manifest: meta });
                   snapshotCount++;
@@ -533,6 +541,7 @@ export async function reviewGameImport(store, planId, decisions) {
       if (!target || targets.has(target.id) || target.purgeGamePending || target.purgeSnapshotsPending) {
         throw store.error('gameTransfer.invalidGameOverwriteTarget');
       }
+      store.assertGameWritable(target.id);
       targets.add(target.id);
     }
     choices.set(item.id, structuredClone(choice));
@@ -567,7 +576,7 @@ export async function reviewGameImport(store, planId, decisions) {
     const source = path.join(item.directory, 'snapshots');
     if (item.includesSnapshots && item.snapshotCount > 0) {
       // Only the named, verified export format is accepted inside a game bundle.
-      if (!(await store.exportIndexCandidates(source))) {
+      if (!(await exportIndexCandidates(store, source))) {
         throw store.error('gameTransfer.missingBundleSnapshotIndex');
       }
       snapshotPlan = await progressTask(
@@ -650,7 +659,7 @@ export async function executeGameImport(store, reviewId, decisions) {
     if ((await indexHash(snapshotPlan.directory, store.lang)) !== snapshotPlan.indexHash) {
       throw store.error('gameTransfer.bundleSnapshotIndexChanged');
     }
-    const choices = await store.validateImportPlan(snapshotPlan, decision.decisions);
+    const choices = await validateImportPlan(store, snapshotPlan, decision.decisions);
     for (const [itemIndex, item] of snapshotPlan.items.entries()) {
       if (choices.get(item.id)?.action === 'skip') continue;
       const start = (decisionIndex + itemIndex / snapshotPlan.items.length) / decisions.length;
@@ -684,6 +693,7 @@ export async function executeGameImport(store, reviewId, decisions) {
         20 + (75 * index) / review.resolved.length,
         20 + (75 * (index + 1)) / review.resolved.length,
         async () => {
+          store.assertGameWritable(entry.game.id);
           await store.commitGame(entry.game);
           importedGameIds.add(entry.game.id);
           report.games[
@@ -692,7 +702,7 @@ export async function executeGameImport(store, reviewId, decisions) {
           if (entry.snapshotPlan) {
             report.snapshots.push({
               gameName: entry.game.name,
-              report: await store.applyImportPlan(entry.snapshotPlan, saveChoices.get(entry.item.id), entry.game),
+              report: await applyImportPlan(store, entry.snapshotPlan, saveChoices.get(entry.item.id), entry.game),
             });
           }
         },

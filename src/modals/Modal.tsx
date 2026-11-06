@@ -22,7 +22,10 @@ export function Modal({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = ref.current;
-    const focus = element?.querySelector<HTMLElement>('input, textarea, button');
+    const focus =
+      element?.querySelector<HTMLElement>(
+        '.modal-body [data-autofocus]:not(:disabled), .modal-body input:not(:disabled), .modal-body textarea:not(:disabled), .modal-body select:not(:disabled), .modal-body button:not(:disabled)',
+      ) || element?.querySelector<HTMLElement>('button:not(:disabled)');
     focus?.focus();
     return () => previous?.focus();
   }, []);
@@ -36,9 +39,14 @@ export function Modal({
             'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
           ) || [],
         );
+        if (!items.length) return;
         const first = items[0];
         const last = items[items.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
+        const activeInside = ref.current?.contains(document.activeElement);
+        if (!activeInside) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
           event.preventDefault();
           last?.focus();
         } else if (!event.shiftKey && document.activeElement === last) {

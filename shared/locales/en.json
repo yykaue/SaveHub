@@ -83,8 +83,6 @@
     "listView": "List View",
     "headingTitle": "All Your Worlds, Right Here.",
     "headingDesc": "Each game is managed independently, giving every adventure its own space.",
-    "sectionTitle": "Games",
-    "editGameAria": "Edit {name}",
     "statusReady": "Save directory connected",
     "statusRequired": "Save path required",
     "openLibrary": "Open Library",
@@ -190,8 +188,6 @@
     "safetyRollbackDesc": "Rolls back automatically if replacement fails, and recovers unfinished transactions on next startup.",
     "removedGamesTitle": "Removed Games",
     "removedGamesDesc": "Recover, permanently delete or retry cleanup of removed games in All Games.",
-    "restoreGameProject": "Restore Game",
-    "noRemovedGames": "No removed games.",
     "openLogs": "Open log folder",
     "logsDesc": "Logs are grouped by type and operation and share one capacity limit, defaulting to 20 MB (1 MB = 1,048,576 bytes). Oldest records are removed when the limit is exceeded.",
     "manageRemovedGames": "Manage removed games"
@@ -214,6 +210,7 @@
     "tabScopeDesc": "all {count} save(s) in the \"{tab}\" tab, regardless of search",
     "batchSelectedPrefix": "Selected ",
     "batchSelectedSuffix": "",
+    "batchCrossPageHint": " (across {pages} pages)",
     "batchProtectedTrashHint": " · Includes protected saves (recover and unprotect to delete)",
     "batchProtectedHint": " · Includes protected saves (unprotect to delete)",
     "batchIdleTrashHint": "Select saves to batch recover, permanently delete, or export",
@@ -317,8 +314,6 @@
     "retentionAfterImport": "Restore point limits are applied after the entire import finishes. Excess records may be removed or permanently deleted.",
     "protectedOverwriteHint": "The local record is protected and cannot be overwritten. Choose Skip or Keep Both.",
     "tagProtected": " · Protected",
-    "tagTrash": " · Trash",
-    "tagRestorePoint": " · Restore Point",
     "tagPurgePending": " · Pending Deletion",
     "actionOverwrite": "Overwrite",
     "actionSkip": "Skip",
@@ -352,6 +347,7 @@
     "resultSkipped": "Skipped",
     "resultFailed": "Failed",
     "resultDesc": "Source files were preserved. Newly imported, overwritten, and coexisting saves are available in the timeline.",
+    "retentionPrunedNotice": "Per current restore point retention limits, {movedCount} point(s) moved to the removed queue and {purgedCount} excess point(s) were permanently deleted.",
     "doneBtn": "Done"
   },
   "modals": {
@@ -366,7 +362,6 @@
       "restore": "Return to This Moment",
       "deletePermanent": "Delete Saves Permanently",
       "deleteSoft": "Move Saves",
-      "removeGame": "Remove Game",
       "detail": "Save Details",
       "restorePoints": "Restore Points",
       "batchReport": "Batch Operation Report",
@@ -378,11 +373,6 @@
       "summary": "Completed {updated}, failed {failed}.",
       "permanentDesc": "Some files may already be removed; records marked \"Pending Deletion\" can only be retried for deletion and cannot be recovered.",
       "softDesc": "Unfinished items remain unchanged. Resolve the issues below and try again."
-    },
-    "removeGame": {
-      "question": "Remove \"{name}\" from your games?",
-      "desc": "Existing backups will be kept and can be restored from \"Settings & About → Removed Games\". Live game files are untouched.",
-      "confirmBtn": "Remove Game"
     },
     "detail": {
       "emptyNote": "No notes added for this save.",
@@ -537,9 +527,7 @@
     "updatedSnapshotToast": "Save details updated.",
     "createdSnapshotToast": "New save created and verified.",
     "restoringSnapshot": "Restoring save safely",
-    "restoredSnapshotToast": "Loaded \"{label}\". Previous progress was saved as a restore point.",
-    "removingGameProject": "Removing game",
-    "removedGameToast": "Game removed. Backups are preserved."
+    "restoredSnapshotToast": "Loaded \"{label}\". Previous progress was saved as a restore point."
   },
   "format": {
     "kinds": {
@@ -654,7 +642,6 @@
     "restoreAborted": "Restore did not complete; original save was kept or restored. {error}",
     "invalidJournalPaths": "Invalid restore journal paths; no game files were modified.",
     "invalidJournalEntry": "Invalid restore journal entry.",
-    "invalidTransactionStage": "Invalid transaction staging directory.",
     "recoveredInterruptedRestore": "Recovered an interrupted restore from the previous session; original game saves were restored.",
     "quarantinedCorruptJournal": "Found a corrupted transaction journal ({name}); isolated for inspection.",
     "invalidImportReplaceJournal": "Invalid import replacement transaction.",
@@ -689,16 +676,17 @@
     "pickExportDirRequired": "Please select an export destination.",
     "exportDirInsideVault": "Please select an export directory outside the SaveHub vault.",
     "exportCleanupOutOfBounds": "Export cleanup directory out of bounds.",
-    "exportStageOutOfBounds": "Export staging directory out of bounds.",
+    "unnamedExport": "Unnamed Save",
+    "snapshotExportSuffix": "Save Export",
     "diskSpaceUnavailable": "Cannot read available disk space: {error}",
     "gameRecoveryBlocked": "This game has an unresolved recovery transaction and cannot be modified. Open the logs, resolve it and restart.",
     "recoveryReadFailed": "Cannot read recovery journal. Original retained: {file}",
     "quarantineFailed": "Could not quarantine damaged journal {name}. Original retained at {file}.",
     "recoveryIncomplete": "Recovery is incomplete. Journal and files retained: {file}; {error}",
-    "libraryRecoveryAvailable": "Library configuration is damaged. Original retained; a previous valid configuration is available.",
     "libraryRecovered": "Recovered previous configuration. Damaged copy retained at {file}."
   },
   "gameTransfer": {
+    "gameExportSuffix": "Game Export",
     "gameNameLength": "Game name must be between 1 and 80 characters.",
     "invalidGameRoot": "Invalid game root directory.",
     "invalidGameIconFormat": "Please use a PNG, JPEG, or WebP icon.",
@@ -715,7 +703,6 @@
     "cannotExportGamesIntoVault": "Please select an export directory outside the SaveHub vault.",
     "maxSingleGameSnapshotsExport": "Can export at most 10,000 save records per game at once.",
     "gameExportCleanupOutOfBounds": "Game export cleanup directory out of bounds.",
-    "gameExportStageOutOfBounds": "Game export staging directory out of bounds.",
     "gameConfigFileTooLarge": "Game configuration file is too large.",
     "invalidGameExportFormat": "Invalid game export format.",
     "invalidBundleSnapshotCount": "Invalid snapshot count in game bundle.",
@@ -751,6 +738,8 @@
   "progress": {
     "checking": "Checking and verifying files",
     "copying": "Copying files",
+    "restoring": "Restoring save files",
+    "deleting": "Permanently deleting snapshots",
     "importing": "Importing records",
     "exporting": "Exporting records",
     "pruning": "Applying restore point retention",

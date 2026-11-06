@@ -1,4 +1,5 @@
-import type { Bridge, CommandName, Result, Progress } from '../shared/contracts';
+import type { Bridge, CommandName, Commands, Result, Progress, ProgressPhase } from '../shared/contracts';
+import { IPC_SCHEMA } from '../shared/ipc-schema.mjs';
 declare const api: Bridge;
 api.setRestorePointRetention({ active: 0, removed: 15 });
 // @ts-expect-error Retention values are numeric, never strings.
@@ -9,4 +10,9 @@ const invalid: CommandName = 'purgeEverything';
 const failedResult: Result<number> = { ok: true, error: { code: 'bad', params: {}, message: 'bad' } };
 // @ts-expect-error Progress completion is numeric.
 const progress: Progress = { phase: 'copying', detail: '', completed: '1' };
-void [invalid, failedResult, progress];
+// @ts-expect-error Progress phase must be a known ProgressPhase union member.
+const badPhase: ProgressPhase = 'unknown-phase';
+const schemaCheck: Record<CommandName, ((value: unknown) => boolean)[]> = IPC_SCHEMA;
+type AssertAllCommandsInBridge = Exclude<CommandName, keyof Commands> extends never ? true : never;
+const bridgeCheck: AssertAllCommandsInBridge = true;
+void [invalid, failedResult, progress, badPhase, schemaCheck, bridgeCheck];

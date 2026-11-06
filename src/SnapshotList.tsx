@@ -297,6 +297,9 @@ export function SnapshotList({
               {t('snapshots.batchSelectedPrefix')}
               <strong>{selected.length}</strong>
               {t('snapshots.batchSelectedSuffix')}
+              {pagination.pages > 1 &&
+                selected.length > pagination.items.filter((item) => view.selectedIds.includes(item.id)).length &&
+                t('snapshots.batchCrossPageHint', { pages: pagination.pages })}
               {selectedProtected > 0 &&
                 (filter === 'trash' ? t('snapshots.batchProtectedTrashHint') : t('snapshots.batchProtectedHint'))}
             </>

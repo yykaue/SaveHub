@@ -274,6 +274,12 @@ export function ImportResult({
         </span>
       </div>
       <p className="muted">{description ?? t('import.resultDesc')}</p>
+      {report.pruned && (report.pruned.movedCount > 0 || report.pruned.purgedCount > 0) && (
+        <div className="notice compact" role="status">
+          <Info size={15} />
+          <span>{t('import.retentionPrunedNotice', report.pruned)}</span>
+        </div>
+      )}
       {groups
         .filter((group) => group.items.length)
         .map((group) => (

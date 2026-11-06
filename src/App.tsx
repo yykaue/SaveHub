@@ -212,9 +212,10 @@ export default function App() {
     .flatMap((game) => [...game.snapshots, ...game.restorePoints])
     .reduce((total, snapshot) => total + snapshot.bytes, 0);
   const saves = current ? visibleSaves(current) : [];
-  const view = views[current?.id] || defaultView;
+  const view = (current && views[current.id]) || defaultView;
 
-  const updateView = (changes: Partial<LibraryView>, gameId = current.id) => {
+  const updateView = (changes: Partial<LibraryView>, gameId = current?.id) => {
+    if (!gameId) return;
     const update = () =>
       setViews((previous) => ({ ...previous, [gameId]: { ...(previous[gameId] || defaultView), ...changes } }));
     setMenu(null);
@@ -282,14 +283,14 @@ export default function App() {
     }
     if (action === 'favorite') {
       void perform(t('messages.updatingFavorite'), () =>
-        api.updateSnapshot(current.id, snapshot.id, { favorite: !snapshot.favorite }),
+        api.updateSnapshot(snapshot.gameId, snapshot.id, { favorite: !snapshot.favorite }),
       );
       return;
     }
     if (action === 'protect') {
       void perform(
         t('messages.updatingProtection'),
-        () => api.updateSnapshot(current.id, snapshot.id, { protected: !snapshot.protected }),
+        () => api.updateSnapshot(snapshot.gameId, snapshot.id, { protected: !snapshot.protected }),
         snapshot.protected ? t('messages.unprotectedToast') : t('messages.protectedToast'),
       );
       return;
@@ -297,31 +298,34 @@ export default function App() {
     if (action === 'recover') {
       void perform(
         t('messages.recoveringSave'),
-        () => api.updateSnapshot(current.id, snapshot.id, { deleted: false }),
+        () => api.updateSnapshot(snapshot.gameId, snapshot.id, { deleted: false }),
         t('messages.recoveredSaveToast'),
       );
       return;
     }
     if (action === 'verify') {
       void perform(t('messages.verifyingSave'), async () => {
-        const result = await api.verifySnapshot(current.id, snapshot.id);
+        const result = await api.verifySnapshot(snapshot.gameId, snapshot.id);
         setToast({ text: t('messages.verifiedToast', { count: result.fileCount }) });
       });
       return;
     }
     if (action === 'export') {
       void perform(t('messages.exportingSave'), async () => {
-        const result = await api.exportSnapshot(current.id, snapshot.id);
+        const result = await api.exportSnapshot(snapshot.gameId, snapshot.id);
         if (result) setToast({ text: t('messages.exportedSingleToast', { path: result }) });
       });
     }
   };
 
-  const exportBatch = (selection: string[]) =>
-    perform(t('messages.exportingBatch'), async () => {
-      const result = await api.exportSnapshots(current.id, selection);
+  const exportBatch = (selection: string[]) => {
+    if (!current) return Promise.resolve();
+    const gameId = current.id;
+    return perform(t('messages.exportingBatch'), async () => {
+      const result = await api.exportSnapshots(gameId, selection);
       if (result) setToast({ text: t('messages.exportedBatchToast', { count: result.count, folder: result.folder }) });
     });
+  };
 
   function requestDelete(snapshots: Snapshot[], returnTo?: 'restore-points') {
     if (!snapshots.length) return;
@@ -412,6 +416,7 @@ export default function App() {
   };
 
   const batchProtect = async (selection: string[], protectedTag: boolean) => {
+    if (!current) return;
     const gameId = current.id;
     const report = await perform(t(protectedTag ? 'messages.batchProtecting' : 'messages.batchUnprotecting'), () =>
       api.updateSnapshots(gameId, selection, { protected: protectedTag }),
@@ -819,7 +824,13 @@ export default function App() {
               onConfirm={(deleteRecords) =>
                 void perform(
                   t('games.deleting'),
-                  () => api.removeGame(modal.game.id, false, deleteRecords),
+                  async () => {
+                    await api.removeGame(modal.game.id, false, deleteRecords);
+                    setGamesView((previous) => ({
+                      ...previous,
+                      selectedIds: previous.selectedIds.filter((id) => id !== modal.game.id),
+                    }));
+                  },
                   t(deleteRecords ? 'games.purgeSuccess' : 'games.deleteSuccess'),
                   true,
                 )

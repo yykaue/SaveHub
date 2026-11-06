@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type FormEvent } from 'react';
 import { Check, FolderOpen, Info, LoaderCircle, Monitor, Trash2, Upload } from 'lucide-react';
 import { GameGlyph } from '../art';
+import { gameName } from '../format';
 import { getDictionary, t } from '../i18n';
 import { animate } from '../motion';
 import type { Bridge, Game, GameInput, Platform } from '../types';
@@ -105,7 +106,7 @@ export function GameForm({
               onChange={(event) => {
                 const template = templates.find((item) => item.id === event.target.value);
                 if (!template) return;
-                setName(template.name);
+                setName(gameName(template));
                 setSubtitle(template.subtitle);
                 setIcon(template.icon);
                 setColor(template.color);
@@ -115,7 +116,7 @@ export function GameForm({
               <option value="">{t('templates.empty')}</option>
               {templates.map((template) => (
                 <option key={template.id} value={template.id}>
-                  {template.name} · {template.subtitle}
+                  {gameName(template)} · {template.subtitle}
                 </option>
               ))}
             </select>
