@@ -61,14 +61,14 @@ Imports and exports show a progress bar, percentage, current stage, and the reco
 
 Every manually created or imported save has a single ID and a single copy of its payload. Favorite, Protected, and Recycle Bin states only update metadata flags on that record without duplicating files.
 
-| View | Scope |
-| --- | --- |
-| All Saves | All non-deleted manual or imported saves, including Favorited and Protected records; excludes Recycle Bin and Restore Points |
-| Favorites | Records marked as Favorite and not in the Recycle Bin; may also be marked as Protected |
-| Protected | Records marked as Protected and not in the Recycle Bin |
-| Recycle Bin | Deleted manual or imported records; can be recovered with original badges intact, or permanently deleted after confirmation |
-| Restore Points | Progress automatically backed up right before a restore; displayed separately and not counted in All Saves; can be restored to the game or removed |
-| Removed Restore Points | Records removed from Restore Points; can be recovered back to the Restore Points list, or permanently deleted after confirmation |
+| View                   | Scope                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All Saves              | All non-deleted manual or imported saves, including Favorited and Protected records; excludes Recycle Bin and Restore Points                       |
+| Favorites              | Records marked as Favorite and not in the Recycle Bin; may also be marked as Protected                                                             |
+| Protected              | Records marked as Protected and not in the Recycle Bin                                                                                             |
+| Recycle Bin            | Deleted manual or imported records; can be recovered with original badges intact, or permanently deleted after confirmation                        |
+| Restore Points         | Progress automatically backed up right before a restore; displayed separately and not counted in All Saves; can be restored to the game or removed |
+| Removed Restore Points | Records removed from Restore Points; can be recovered back to the Restore Points list, or permanently deleted after confirmation                   |
 
 You can add or remove the protection mark from a save's **More Actions** menu. Sidebar counts, game cards, timeline metrics, and All Saves statistics all reflect the **All Saves** scope. Toggling Favorite or Protected never changes a record's ID, directory path, or total count; the same record can appear in All Saves, Favorites, and Protected simultaneously. The Protected mark blocks soft deletion and permanent deletion, while still allowing restore and export; Favorite is used solely for marking and filtering and does not block deletion.
 
@@ -78,12 +78,12 @@ Saves in the Recycle Bin cannot have their protection mark modified: the toolbar
 
 In tabs other than the Recycle Bin, both protection buttons adapt dynamically based on the state of records within their respective scopes:
 
-| Scope State | Selected Button | All Button | Click Action |
-| --- | --- | --- | --- |
-| All Protected | Unprotect Selected | Unprotect All | Remove protection from all in scope |
-| All Unprotected | Protect Selected | Protect All | Add protection to all in scope |
-| Mixed Protected & Unprotected | Protect Selected | Protect All | Add protection to all in scope |
-| No Records | Protect Selected (Disabled) | Protect All (Disabled) | No action |
+| Scope State                   | Selected Button             | All Button             | Click Action                        |
+| ----------------------------- | --------------------------- | ---------------------- | ----------------------------------- |
+| All Protected                 | Unprotect Selected          | Unprotect All          | Remove protection from all in scope |
+| All Unprotected               | Protect Selected            | Protect All            | Add protection to all in scope      |
+| Mixed Protected & Unprotected | Protect Selected            | Protect All            | Add protection to all in scope      |
+| No Records                    | Protect Selected (Disabled) | Protect All (Disabled) | No action                           |
 
 Protect actions use a green shield-check icon, while Unprotect actions use an amber shield-off icon, with distinct text, border, and background colors tailored for all four themes.
 
@@ -108,7 +108,7 @@ Each export generates an independent outer folder, automatically appending ` (2)
 
 Imported Restore Points retain their restore point category and removed state. Overwriting preserves the local target's category and state.
 
-Automatic safety backups from v1.0.0 remain in their original location and have been displayed under **Restore Points** since v1.1.0 without copying or migrating files. v1.1.2 kept manual **Protected** saves separate from automatic **Restore Points** and shifted deletion protection from Favorites to Protected. v1.1.3 unified **All Saves** to include Favorited and Protected records and added batch permanent deletion and recovery. v1.1.4 required recovering Recycle Bin records before changing protection marks and added the dedicated outer folder for all exports. Existing badges and save payloads require no migration.
+Automatic safety backups from v1.0.0 remain in their original location and have been displayed under **Restore Points** since v1.1.0 without copying or migrating files. v1.1.2 kept manual **Protected** saves separate from automatic **Restore Points** and shifted deletion protection from Favorites to Protected. v1.1.3 unified **All Saves** to include Favorited and Protected records and added batch permanent deletion and recovery. v1.1.4 required recovering Recycle Bin records before changing protection marks and added the dedicated outer folder for all exports. v1.1.5 introduced dual-queue 5/15 restore point retention with stable timestamp expiration, 20 MiB classified rolling logs, restore transactions with crash containment, disk space preflight checks, and unified game workspace management. Existing badges and save payloads require no migration.
 
 ## Storage & Recovery Rules
 
@@ -144,7 +144,6 @@ SaveHub uses a unified Electron and Node.js filesystem implementation with zero 
 Minimum OS requirements follow the current Electron runtime: Windows 10 or later, and macOS 13 Ventura or later. macOS release targets are configured for **arm64** (Apple Silicon) only; Intel Mac builds are not produced. Windows builds currently target x64.
 
 Historical verification (not evidence for this 1.1.5 build): on 2026-11-03, source tests, all four GUI test suites, and `pnpm dist:mac` packaging were verified on an Apple Silicon Mac (macOS 26.6), and the packaged `.app` passed the baseline GUI test suite. The macOS bundle uses ad-hoc signing (`build.mac.identity: "-"`), which prevents macOS from reporting the downloaded bundle as "damaged"; when opening on another Mac for the first time, allow it in **System Settings → Privacy & Security**. Before distributing to external users, configure Apple Developer ID signing and notarization (and remove `identity: "-"`); this repository does not include signing certificates or notarization credentials. Windows builds are also unsigned by default.
-
 
 ## Restore Point Retention and Logs
 
@@ -248,5 +247,4 @@ Verification of the duplicate import workflow on 2026-11-02: all 73 storage test
 
 On the same day, the Recycle Bin toolbar and Logo updates passed production build, strict TypeScript checks, and three Electron GUI regression suites: baseline UI (12 checks), interactions (16 checks), and deletion suite (6 checks) with 0 renderer errors. Confirmed that both protection buttons are hidden in the Recycle Bin while working normally in other tabs, the new Logo renders cleanly across all four themes, and the multi-resolution Windows ICO loads properly via native OS image APIs.
 
-The single-file Windows portable executable is unpacked by an NSIS launcher before starting Electron; `scripts/portable-smoke.mjs` connects to the actual window via a test-only localhost debugging port to verify the version, UI assets, startup, backup, restore, automatic Restore Point creation, and clean exit without relying on stdout forwarding from the launcher. For current delivery evidence, see [1.1.5 remediation results](docs/savehub_remediation_result.md); [1.1.4 Acceptance Record](docs/验收记录-1.1.4.md); historical records for [1.1.3](docs/验收记录-1.1.3.md), [1.1.2](docs/验收记录-1.1.2.md), [1.1.1](docs/验收记录-1.1.1.md), [1.1.0](docs/验收记录-1.1.0.md), and [1.0.0](docs/验收记录.md) are preserved.
-
+The single-file Windows portable executable is unpacked by an NSIS launcher before starting Electron; `scripts/portable-smoke.mjs` connects to the actual window via a test-only localhost debugging port to verify the version, UI assets, startup, backup, restore, automatic Restore Point creation, and clean exit without relying on stdout forwarding from the launcher. For current delivery evidence, see [1.1.5 Acceptance Record](docs/验收记录-1.1.5.md) and [1.1.5 remediation results](docs/savehub_remediation_result.md); [1.1.4 Acceptance Record](docs/验收记录-1.1.4.md); historical records for [1.1.3](docs/验收记录-1.1.3.md), [1.1.2](docs/验收记录-1.1.2.md), [1.1.1](docs/验收记录-1.1.1.md), [1.1.0](docs/验收记录-1.1.0.md), and [1.0.0](docs/验收记录.md) are preserved.
