@@ -2718,14 +2718,6 @@ input[type='checkbox'] {
   color: var(--text);
   font-size: 11px;
 }
-.import-protected {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  color: var(--accent);
-  font-size: 11px;
-  margin-top: 10px;
-}
 .import-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2759,7 +2751,7 @@ input[type='checkbox'] {
   accent-color: var(--accent);
   margin: 0;
 }
-.import-overwrite-warning {
+.import-state-notice {
   display: flex;
   gap: 8px;
   margin-top: 12px;
@@ -2771,16 +2763,30 @@ input[type='checkbox'] {
   font-size: 11px;
   line-height: 1.7;
 }
-.import-overwrite-warning > svg {
+.import-state-notice > svg {
   flex-shrink: 0;
   margin-top: 3px;
-  color: var(--red);
+  color: var(--accent);
+}
+.import-state-notice > div {
+  min-width: 0;
+}
+.import-state-notice.is-protected {
+  border-color: var(--protect-on);
+  border-inline-start-width: 4px;
+  background: color-mix(in srgb, var(--protect-on) 10%, var(--surface));
+  color: var(--text);
+}
+.import-state-notice.is-protected > svg {
+  color: var(--protect-on);
 }
 .import-state-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 4px;
+}
+.import-state-tags + p {
+  margin-top: 4px;
 }
 .import-state-tags span {
   border: 1px solid var(--line-strong);
@@ -2788,6 +2794,13 @@ input[type='checkbox'] {
   padding: 1px 7px;
   font-weight: 600;
   color: var(--text);
+}
+.import-state-tags .import-protected-tag {
+  border-color: var(--protect-on);
+  background: color-mix(in srgb, var(--protect-on) 16%, var(--surface));
+  color: var(--protect-on);
+  font-size: 12px;
+  font-weight: 700;
 }
 .import-choice-summary {
   color: var(--muted);

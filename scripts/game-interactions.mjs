@@ -164,14 +164,19 @@ await runE2E('game-interactions', async (harness) => {
   await expect(dialog.locator('.import-conflict')).toHaveCount(4);
   const conflict = (name) => dialog.getByRole('region', { name: `重复存档 雪原之旅 / ${name}`, exact: true });
   await expect(conflict('保护记录').getByRole('radio', { name: '覆盖', exact: true })).toBeDisabled();
+  await expect(conflict('保护记录').locator('.import-protected-tag')).toHaveText('保护存档');
   for (const name of ['回收站记录', '读档恢复点']) {
     await expect(conflict(name).getByRole('radio', { name: '覆盖', exact: true })).toBeEnabled();
+    await expect(conflict(name).locator('.import-state-notice')).toBeVisible();
     await conflict(name).getByRole('radio', { name: '覆盖', exact: true }).check();
-    await expect(conflict(name).locator('.import-overwrite-warning')).toBeVisible();
+    await expect(conflict(name).locator('.import-state-notice')).toContainText('保留这些状态');
     await conflict(name).getByRole('radio', { name: '跳过', exact: true }).check();
+    await expect(conflict(name).locator('.import-state-notice')).toBeVisible();
   }
-  await expect(dialog.getByRole('button', { name: '全部覆盖', exact: true })).toBeDisabled();
-  await conflict('普通记录').getByRole('radio', { name: '覆盖', exact: true }).check();
+  await dialog.getByRole('button', { name: '除保护存档全覆盖', exact: true }).click();
+  for (const name of ['普通记录', '回收站记录', '读档恢复点'])
+    await expect(conflict(name).getByRole('radio', { name: '覆盖', exact: true })).toBeChecked();
+  await expect(conflict('保护记录').getByRole('radio', { name: '跳过', exact: true })).toBeChecked();
   await conflict('保护记录').getByRole('radio', { name: '两者并存', exact: true }).check();
   assert.equal((await diskGames()).length, 3);
   assert.equal((await store.snapshots(gameId, true)).length, 4);

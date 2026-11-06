@@ -81,13 +81,24 @@ await runE2E('import-interactions', async (harness) => {
   await expect(dialog.locator('.import-conflict')).toHaveCount(4);
   await expect(dialog).toContainText('另有 1 份新存档');
   await expect(dialog).toContainText('ArchiveFileBroken');
-  await expect(dialog.getByRole('button', { name: '全部覆盖', exact: true })).toBeDisabled();
+  const overwriteUnprotected = dialog.getByRole('button', { name: '除保护存档全覆盖', exact: true });
+  await expect(overwriteUnprotected).toBeEnabled();
   for (const name of names)
     await expect(conflict(name).getByRole('radio', { name: '跳过', exact: true })).toBeChecked();
   await expect(conflict(names[3]).getByRole('radio', { name: '覆盖', exact: true })).toBeDisabled();
+  await overwriteUnprotected.click();
+  for (const name of names.slice(0, 3))
+    await expect(conflict(name).getByRole('radio', { name: '覆盖', exact: true })).toBeChecked();
+  await expect(conflict(names[3]).getByRole('radio', { name: '跳过', exact: true })).toBeChecked();
+  await expect(dialog.locator('.import-choice-summary')).toHaveText('新导入 1 · 覆盖 3 · 跳过 1 · 两者并存 0');
   await dialog.getByRole('button', { name: '全部并存', exact: true }).click();
   for (const name of names)
     await expect(conflict(name).getByRole('radio', { name: '两者并存', exact: true })).toBeChecked();
+  await overwriteUnprotected.click();
+  for (const name of names.slice(0, 3))
+    await expect(conflict(name).getByRole('radio', { name: '覆盖', exact: true })).toBeChecked();
+  await expect(conflict(names[3]).getByRole('radio', { name: '两者并存', exact: true })).toBeChecked();
+  await expect(dialog.locator('.import-choice-summary')).toHaveText('新导入 1 · 覆盖 3 · 跳过 0 · 两者并存 1');
   await dialog.getByRole('button', { name: '全部跳过', exact: true }).click();
   await conflict(names[0]).getByRole('radio', { name: '覆盖', exact: true }).check();
   await conflict(names[2]).getByRole('radio', { name: '两者并存', exact: true }).check();
@@ -98,6 +109,19 @@ await runE2E('import-interactions', async (harness) => {
   await untouched();
   done(
     'One dialog lists every conflict, supports independent and bulk choices, and defers both duplicates and new saves until confirmation',
+  );
+
+  await openImport(path.join(legacy, names[3]));
+  await expect(overwriteUnprotected).toBeDisabled();
+  await expect(dialog.locator('.import-protected-tag')).toHaveText('保护存档');
+  await expect(dialog.locator('.import-state-notice')).toContainText('不能覆盖');
+  await dialog.getByRole('button', { name: '全部并存', exact: true }).click();
+  await expect(overwriteUnprotected).toBeDisabled();
+  await expect(dialog.locator('.import-protected-tag')).toHaveText('保护存档');
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await untouched();
+  done(
+    'Bulk overwrite excludes protected targets, preserves their skip/keep-both choices, and is disabled when all targets are protected',
   );
 
   await openImport();
@@ -133,11 +157,28 @@ await runE2E('import-interactions', async (harness) => {
     }));
     assert(dimensions.top >= 0 && dimensions.bottom <= dimensions.height && dimensions.scrollWidth <= dimensions.width);
     await page.screenshot({ path: path.join(screenshots, `import-conflicts-${theme}.png`), animations: 'disabled' });
+    await conflict(names[3]).locator('.import-state-notice').scrollIntoViewIfNeeded();
+    await expect(conflict(names[3]).locator('.import-protected-tag')).toBeInViewport();
+    await expect(dialog.getByRole('button', { name: '执行导入', exact: true })).toBeInViewport();
+    await page.screenshot({ path: path.join(screenshots, `import-protected-${theme}.png`), animations: 'disabled' });
     await dialog.getByRole('button', { name: '取消', exact: true }).click();
     await expect(dialog).toHaveCount(0);
   }
   await untouched();
   done('Conflict dialog, scrollable rows and final action remain usable at the minimum window size in all four themes');
+
+  await page.getByRole('button', { name: '切换语言', exact: true }).click();
+  await idle();
+  await page.getByRole('button', { name: 'Import Saves', exact: true }).click();
+  await expect(dialog).toHaveAccessibleName('Resolve Duplicate Saves');
+  await idle();
+  await expect(dialog.getByRole('button', { name: 'Overwrite All Except Protected', exact: true })).toBeInViewport();
+  await expect(dialog.locator('.import-protected-tag')).toHaveText('Protected Save');
+  await expect(dialog.getByRole('button', { name: 'Import Now', exact: true })).toBeInViewport();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch language', exact: true }).click();
+  await idle();
+  done('Protected state labels and the longer bulk overwrite label work in English at minimum window size');
 
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 960));
   const calls = await application.evaluate(() => globalThis.__importPickerCalls);
@@ -199,6 +240,36 @@ await runE2E('import-interactions', async (harness) => {
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   done('A single duplicate uses the same dialog and multiple existing copies require an explicit overwrite target');
+
+  await page.evaluate(({ gameId, id }) => window.savehub.updateSnapshot(gameId, id, { protected: true }), {
+    gameId,
+    id: originals[2].id,
+  });
+  await openImport();
+  const multipleTargets = conflict(names[2]);
+  await multipleTargets.getByRole('combobox').selectOption(copy.id);
+  await multipleTargets.getByRole('radio', { name: '覆盖', exact: true }).check();
+  await multipleTargets.getByRole('combobox').selectOption(originals[2].id);
+  await expect(multipleTargets.getByRole('radio', { name: '跳过', exact: true })).toBeChecked();
+  await expect(multipleTargets.locator('.import-protected-tag')).toHaveText('保护存档');
+  await overwriteUnprotected.click();
+  await expect(multipleTargets.getByRole('combobox')).toHaveValue(originals[2].id);
+  await expect(multipleTargets.getByRole('radio', { name: '跳过', exact: true })).toBeChecked();
+  await expect(conflict(names[0]).getByRole('radio', { name: '覆盖', exact: true })).toBeChecked();
+  await multipleTargets.getByRole('combobox').selectOption(copy.id);
+  await expect(multipleTargets.locator('.import-state-notice')).toHaveCount(0);
+  await overwriteUnprotected.click();
+  await expect(multipleTargets.getByRole('combobox')).toHaveValue(copy.id);
+  await expect(multipleTargets.getByRole('radio', { name: '覆盖', exact: true })).toBeChecked();
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await page.evaluate(({ gameId, id }) => window.savehub.updateSnapshot(gameId, id, { protected: false }), {
+    gameId,
+    id: originals[2].id,
+  });
+  assert.equal(await fs.readFile(payload(originals[2]), 'utf8'), 'original-2');
+  done(
+    'Changing duplicate targets refreshes state badges; bulk overwrite preserves the explicitly selected protected target',
+  );
 
   const fresh = await addSource('独立的新存档', 'fresh-import');
   await application.evaluate((_, directory) => {

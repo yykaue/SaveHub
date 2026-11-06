@@ -46,6 +46,9 @@ export function ImportConflicts({
       duplicates.map((item) => [item.id, { itemId: item.id, action: 'skip', targetId: initialTarget(item).id }]),
     ),
   );
+  const selectedTarget = (item: ImportItem) =>
+    item.matches.find((snapshot) => snapshot.id === choices[item.id].targetId)!;
+  const hasProtectedMatches = duplicates.some((item) => item.matches.some((snapshot) => snapshot.protected));
   const setAction = (item: ImportItem, action: ImportAction) =>
     setChoices((previous) => ({ ...previous, [item.id]: { ...previous[item.id], action } }));
   const applyAll = (action: ImportAction) =>
@@ -53,10 +56,8 @@ export function ImportConflicts({
       Object.fromEntries(
         duplicates.map((item) => {
           const choice = previous[item.id];
-          const target =
-            item.matches.find((snapshot) => snapshot.id === choice.targetId && canOverwrite(snapshot)) ||
-            initialTarget(item);
-          return [item.id, { ...choice, action, targetId: action === 'overwrite' ? target.id : choice.targetId }];
+          const target = item.matches.find((snapshot) => snapshot.id === choice.targetId)!;
+          return [item.id, action === 'overwrite' && !canOverwrite(target) ? choice : { ...choice, action }];
         }),
       ),
     );
@@ -98,10 +99,10 @@ export function ImportConflicts({
           <button
             type="button"
             className="button secondary"
-            disabled={!duplicates.every((item) => item.matches.some(canOverwrite))}
+            disabled={!duplicates.some((item) => canOverwrite(selectedTarget(item)))}
             onClick={() => applyAll('overwrite')}
           >
-            {t('import.bulkOverwriteAll')}
+            {t(hasProtectedMatches ? 'import.bulkOverwriteUnprotected' : 'import.bulkOverwriteAll')}
           </button>
           <button type="button" className="button secondary" onClick={() => applyAll('skip')}>
             {t('import.bulkSkipAll')}
@@ -113,7 +114,8 @@ export function ImportConflicts({
         <div className="import-conflict-list">
           {duplicates.map((item, index) => {
             const choice = choices[item.id];
-            const target = item.matches.find((snapshot) => snapshot.id === choice.targetId)!;
+            const target = selectedTarget(item);
+            const labels = stateLabels(target);
             return (
               <section
                 className="import-conflict"
@@ -164,12 +166,6 @@ export function ImportConflicts({
                     {targetDescription(target)}
                   </p>
                 )}
-                {!canOverwrite(target) && (
-                  <p className="import-protected">
-                    <ShieldCheck size={14} />
-                    {t(snapshotHint(target))}
-                  </p>
-                )}
                 <fieldset className="import-options" aria-label={t('import.itemActionAria', { name: item.name })}>
                   {actions.map((action) => (
                     <label key={action.value} className={choice.action === action.value ? 'selected' : undefined}>
@@ -185,17 +181,25 @@ export function ImportConflicts({
                     </label>
                   ))}
                 </fieldset>
-                {choice.action === 'overwrite' && stateLabels(target).length > 0 && (
-                  <div className="import-overwrite-warning" role="status">
-                    <Info size={16} />
+                {(labels.length > 0 || !canOverwrite(target)) && (
+                  <div className={`import-state-notice${target.protected ? ' is-protected' : ''}`} role="status">
+                    {target.protected ? <ShieldCheck size={20} /> : <Info size={16} />}
                     <div>
-                      <div className="import-state-tags">
-                        {stateLabels(target).map((label) => (
-                          <span key={String(label)}>{label}</span>
-                        ))}
-                      </div>
-                      <p>{t('import.overwriteStateHint')}</p>
-                      {target.kind === 'safety' && <p>{t('import.retentionAfterImport')}</p>}
+                      {(target.protected || labels.length > 0) && (
+                        <div className="import-state-tags">
+                          {target.protected && (
+                            <span className="import-protected-tag">{t('import.stateProtected')}</span>
+                          )}
+                          {labels.map((label) => (
+                            <span key={String(label)}>{label}</span>
+                          ))}
+                        </div>
+                      )}
+                      {!canOverwrite(target) && <p>{t(snapshotHint(target))}</p>}
+                      {choice.action === 'overwrite' && <p>{t('import.overwriteStateHint')}</p>}
+                      {choice.action === 'overwrite' && target.kind === 'safety' && (
+                        <p>{t('import.retentionAfterImport')}</p>
+                      )}
                     </div>
                   </div>
                 )}
