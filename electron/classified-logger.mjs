@@ -87,7 +87,10 @@ export class Logger {
       file: path.join(this.logDir, entry.level, `${entry.operation}.jsonl`),
     };
     const previous = this.records.at(-1);
-    if (previous && (record.time < previous.time || (record.time === previous.time && record.sequence < previous.sequence))) {
+    if (
+      previous &&
+      (record.time < previous.time || (record.time === previous.time && record.sequence < previous.sequence))
+    ) {
       this.unsorted = true;
     }
     this.records.push(record);
