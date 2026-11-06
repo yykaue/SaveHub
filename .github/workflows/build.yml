@@ -25,7 +25,8 @@ jobs:
       - run: pnpm check:contracts
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm test:e2e --grep '(smoke|retention-interactions)$'
+      - run: pnpm test:e2e --grep smoke
+      - run: pnpm test:e2e --grep retention-interactions
       - uses: actions/upload-artifact@v4
         if: always()
         with:
