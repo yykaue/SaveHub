@@ -515,6 +515,36 @@ export class SaveStore {
   }
 
   /**
+   * 仅调整给定游戏所占位置的顺序，保留筛选之外的游戏和全部配置。
+   * @param {string[]} ids
+   */
+  async reorderGames(ids) {
+    return this.exclusive(async () => {
+      if (!Array.isArray(ids) || !ids.length || ids.length > 10000 || new Set(ids).size !== ids.length)
+        throw this.error('errors.invalidArguments');
+      const previous = this.config;
+      const byId = new Map(previous.games.map((game) => [game.id, game]));
+      const ordered = ids.map((id) => {
+        safeId(id, this.lang);
+        const game = byId.get(id);
+        if (!game) throw this.error('storage.gameNotFound');
+        return game;
+      });
+      const selected = new Set(ids);
+      let index = 0;
+      const games = previous.games.map((game) => (selected.has(game.id) ? ordered[index++] : game));
+      if (games.every((game, position) => game === previous.games[position])) return;
+      this.config = { ...previous, games };
+      try {
+        await this.saveConfig();
+      } catch (error) {
+        this.config = previous;
+        throw error;
+      }
+    });
+  }
+
+  /**
    * @param {import('./models').StoredGame} game
    */
   async commitGame(game) {

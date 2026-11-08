@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { SaveStore, atomicJson, within } from '../electron/storage.mjs';
+import { validArguments } from '../shared/ipc-schema.mjs';
 
 const root = path.resolve('.test-data');
 const read = (file) => fs.readFile(file, 'utf8');
@@ -68,6 +69,77 @@ async function review(owner, folder, action = 'skip') {
   const result = await owner.reviewGameImport(plan.id, choices(plan, action));
   return { plan, review: result };
 }
+
+test('game order persists across restart, edits and recovery while retaining hidden games and all records', async (t) => {
+  const f = await fixture(t);
+  await marks(f);
+  const hidden = await f.store.upsertGame({ ...f.input, name: '筛选外游戏' });
+  const third = await f.store.upsertGame({ ...f.input, name: '第三个游戏' });
+  const removed = await f.store.upsertGame({ ...f.input, name: '已删除游戏' });
+  const last = await f.store.upsertGame({ ...f.input, name: '最后的游戏' });
+  await f.store.removeGame(removed);
+  const before = structuredClone(f.store.config.games);
+  const records = await f.store.snapshots(f.id, true);
+  await f.store.reorderGames([last, f.id, third]);
+  const order = [last, hidden, f.id, removed, third];
+  assert.deepEqual(
+    f.store.config.games.map((game) => game.id),
+    order,
+  );
+  assert.deepEqual(
+    f.store.config.games,
+    order.map((id) => before.find((game) => game.id === id)),
+  );
+  assert.deepEqual(await f.store.snapshots(f.id, true), records);
+  const resumed = await new SaveStore(f.store.dataDir).init();
+  assert.deepEqual(
+    (await resumed.state()).games.map((game) => game.id),
+    order,
+  );
+  await resumed.upsertGame({ ...f.input, id: f.id, subtitle: 'Edited' });
+  await resumed.removeGame(removed, true);
+  assert.deepEqual(
+    resumed.config.games.map((game) => game.id),
+    order,
+  );
+  const added = await resumed.upsertGame({ ...f.input, name: '新增游戏' });
+  assert.deepEqual(
+    resumed.config.games.map((game) => game.id),
+    [...order, added],
+  );
+  for (const save of records) assert.equal(await read(f.payload(resumed, f.id, save)), 'original-progress');
+});
+
+test('game reorder rejects duplicate, missing and malformed identifiers without changing the library', async (t) => {
+  const f = await fixture(t);
+  const before = await read(f.store.configFile);
+  const original = f.store.config;
+  assert(validArguments('reorderGames', [[f.id]]));
+  for (const value of [undefined, [], 'game', [123], ['../outside'], Array(10001).fill(f.id)])
+    assert(!validArguments('reorderGames', [value]));
+  for (const value of [undefined, [], 'game', [123], ['../outside'], [f.id, f.id], [f.id, 'missing']]) {
+    await assert.rejects(f.store.reorderGames(value));
+    assert.equal(f.store.config, original);
+    assert.equal(await read(f.store.configFile), before);
+    assert.equal(f.store.busy, false);
+  }
+});
+
+test('game reorder rolls back on failed persistence and obeys the write lock', async (t) => {
+  const f = await fixture(t);
+  const other = await f.store.upsertGame({ ...f.input, name: '另一个游戏' });
+  const original = f.store.config;
+  const before = await read(f.store.configFile);
+  f.store.saveConfig = async () => {
+    await assert.rejects(f.store.reorderGames([f.id, other]), { code: 'storage.operationBusy' });
+    throw new Error('order-write-failed');
+  };
+  await assert.rejects(f.store.reorderGames([other, f.id]), /order-write-failed/);
+  assert.equal(f.store.config, original);
+  assert.equal(await read(f.store.configFile), before);
+  assert.equal(f.store.busy, false);
+  await f.store.reorderGames([f.id, other]); // 顺序未变时不写配置。
+});
 
 test('game deletion defaults to retaining every record, identity and flag through restart and restore', async (t) => {
   const f = await fixture(t);

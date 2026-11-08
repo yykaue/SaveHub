@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Download,
   FolderOpen,
+  GripVertical,
   LayoutGrid,
   List,
   Plus,
@@ -17,6 +18,7 @@ import { GameGlyph, Landscape } from './art';
 import { formatBytes, gameName } from './format';
 import { t } from './i18n';
 import type { Game, Platform } from './types';
+import { useGameReorder } from './hooks/useGameReorder';
 
 export interface GamesView {
   layout: 'cards' | 'list';
@@ -51,6 +53,7 @@ export function AllGames({
   onViewChange,
   onAdd,
   onImport,
+  onReorder,
   ...actions
 }: GameActions & {
   games: Game[];
@@ -59,6 +62,7 @@ export function AllGames({
   onViewChange: (changes: Partial<GamesView>) => void;
   onAdd: () => void;
   onImport: () => void;
+  onReorder: (ids: string[]) => void;
 }) {
   const { busy, onExport, onEdit, onOpen } = actions;
   const active = games.filter((game) => !game.deletedAt);
@@ -68,6 +72,21 @@ export function AllGames({
       (gameName(game) + ' ' + game.subtitle).toLocaleLowerCase().includes(view.query.toLocaleLowerCase().trim()),
   );
   const pagination = usePagination(shown, JSON.stringify([view.removed, view.query]));
+  const reorder = useGameReorder(shown, view.layout, busy, onReorder);
+  const reorderHandle = (game: Game) => (
+    <button
+      type="button"
+      className="icon-button game-reorder-handle"
+      draggable={reorder.enabled}
+      disabled={shown.length < 2}
+      aria-disabled={!reorder.enabled}
+      aria-label={t('games.reorder', { name: gameName(game) })}
+      title={t('games.reorderKeys')}
+      onKeyDown={(event) => reorder.handleKey(event, game.id)}
+    >
+      <GripVertical size={17} />
+    </button>
+  );
   const selection = active.filter((game) => view.selectedIds.includes(game.id));
   const toggle = (id: string) =>
     onViewChange({
@@ -142,7 +161,10 @@ export function AllGames({
           />
         </label>
       </div>
-      <p className="muted small-text management-hint">{t('games.recordHint')}</p>
+      <p className="muted small-text management-hint">
+        {t('games.recordHint')}
+        {shown.length > 1 && <span className="game-reorder-hint">{t('games.reorderHint')}</span>}
+      </p>
       {!view.removed && shown.length > 0 && (
         <label className="confirm-checkbox management-select-all">
           <input
@@ -163,8 +185,14 @@ export function AllGames({
       {view.layout === 'cards' ? (
         <div className="game-grid">
           {pagination.items.map((game) => (
-            <article className="game-card catalog-game" key={game.id} data-game-id={game.id}>
+            <article
+              className="game-card catalog-game"
+              key={game.id}
+              data-game-id={game.id}
+              {...reorder.itemProps(game.id)}
+            >
               <div className="game-card-art">
+                {reorderHandle(game)}
                 <Landscape kind={game.icon} />
                 <span className="game-card-symbol">
                   <GameGlyph icon={game.icon} size={28} />
@@ -221,7 +249,13 @@ export function AllGames({
       ) : (
         <div className="management-list">
           {pagination.items.map((game) => (
-            <article className="management-game catalog-game" key={game.id} data-game-id={game.id}>
+            <article
+              className="management-game catalog-game"
+              key={game.id}
+              data-game-id={game.id}
+              {...reorder.itemProps(game.id)}
+            >
+              {reorderHandle(game)}
               {select(game)}
               <span className="game-glyph" style={{ '--game-color': game.color } as CSSProperties}>
                 <GameGlyph icon={game.icon} size={24} />

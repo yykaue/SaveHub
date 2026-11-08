@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type FormEvent } from 'react';
-import { Check, FolderOpen, Info, LoaderCircle, Monitor, Trash2, Upload } from 'lucide-react';
+import { Check, Download, FolderOpen, Info, LoaderCircle, Monitor, Trash2, Upload } from 'lucide-react';
 import { GameGlyph } from '../art';
 import { gameName } from '../format';
 import { getDictionary, t } from '../i18n';
@@ -23,6 +23,7 @@ export function GameForm({
   onSave,
   onCancel,
   onDelete,
+  onExport,
   retentionDefaults,
 }: {
   game?: Game;
@@ -32,6 +33,7 @@ export function GameForm({
   onSave: (values: GameInput) => Promise<void>;
   onCancel: () => void;
   onDelete?: () => void;
+  onExport?: () => void;
   retentionDefaults: { active: number; removed: number };
 }) {
   const [name, setName] = useState(game?.name || '');
@@ -294,6 +296,12 @@ export function GameForm({
             <button type="button" className="text-button danger-text delete-game-button" onClick={onDelete}>
               <Trash2 size={15} />
               {t('modals.gameForm.removeGameBtn')}
+            </button>
+          )}
+          {onExport && (
+            <button type="button" className="button secondary" onClick={onExport}>
+              <Download size={15} />
+              {t('games.export')}
             </button>
           )}
           <button type="button" className="button secondary" onClick={onCancel}>

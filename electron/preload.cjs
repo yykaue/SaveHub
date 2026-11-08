@@ -17,6 +17,7 @@ const METHODS = [
   'setLogLimitMB',
   'setRestorePointRetention',
   'saveGame',
+  'reorderGames',
   'removeGame',
   'exportGames',
   'importGames',

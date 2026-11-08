@@ -25,7 +25,7 @@ await runE2E('game-interactions', async (harness) => {
   };
   const gameId = await store.upsertGame(input),
     extraId = await store.upsertGame({ ...input, name: '星际漫游', icon: 'rocket' });
-  await store.upsertGame({ ...input, name: '峡谷远征', icon: 'swords' });
+  const thirdId = await store.upsertGame({ ...input, name: '峡谷远征', subtitle: 'CANYON EXPEDITION', icon: 'swords' });
   await store.createSnapshot(gameId, { label: '普通记录', note: 'Original note' });
   const protectedSave = await store.createSnapshot(gameId, { label: '保护记录', note: '' });
   const trash = await store.createSnapshot(gameId, { label: '回收站记录', note: '' });
@@ -70,8 +70,100 @@ await runE2E('game-interactions', async (harness) => {
   await expect(page.locator('.all-games .page-heading > p')).toHaveText('每个游戏独立管理，让不同的冒险各得其所。');
   await expect(page.locator('.all-games')).toHaveAttribute('data-layout', 'cards');
   await expect(page.locator('.game-card.catalog-game')).toHaveCount(3);
+  const visibleOrder = () => page.locator('.catalog-game').evaluateAll((rows) => rows.map((row) => row.dataset.gameId));
+  const checkOrder = async (ids) => {
+    await expect.poll(visibleOrder).toEqual(ids);
+    await expect.poll(async () => (await diskGames()).map((game) => game.id)).toEqual(ids);
+    await expect
+      .poll(() =>
+        page.locator('.game-nav > button').evaluateAll((buttons) => buttons.map((button) => button.dataset.gameId)),
+      )
+      .toEqual(ids);
+    await idle();
+  };
+  await row(thirdId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(gameId), { targetPosition: { x: 8, y: 80 } });
+  await checkOrder([thirdId, gameId, extraId]);
+  const lastCard = await row(extraId).boundingBox();
+  assert(lastCard);
+  await row(thirdId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(extraId), { targetPosition: { x: lastCard.width - 8, y: 80 } });
+  await checkOrder([gameId, extraId, thirdId]);
+  await row(thirdId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(gameId), { targetPosition: { x: 8, y: 80 } });
+  await checkOrder([thirdId, gameId, extraId]);
+  await page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true }).check();
+  await row(extraId)
+    .locator('.game-card-art')
+    .dragTo(row(thirdId), { sourcePosition: { x: 90, y: 80 }, targetPosition: { x: 8, y: 80 } });
+  await checkOrder([extraId, thirdId, gameId]);
+  await row(gameId)
+    .getByRole('button', { name: '进入存档库', exact: true })
+    .dragTo(row(extraId), { targetPosition: { x: 8, y: 80 } });
+  await checkOrder([extraId, thirdId, gameId]);
+  await row(extraId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(thirdId), { targetPosition: { x: 8, y: 80 } });
+  await checkOrder([thirdId, extraId, gameId]);
+  await row(extraId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(thirdId), { targetPosition: { x: lastCard.width - 8, y: 80 } });
+  await checkOrder([extraId, thirdId, gameId]);
+  await expect(page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true })).toBeChecked();
+  await page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true }).uncheck();
   await page.getByRole('button', { name: '列表视图', exact: true }).click();
   await expect(page.locator('.management-game')).toHaveCount(3);
+  await expect.poll(visibleOrder).toEqual([extraId, thirdId, gameId]);
+  await row(gameId).dragTo(row(extraId), { sourcePosition: { x: 140, y: 18 }, targetPosition: { x: 140, y: 8 } });
+  await checkOrder([gameId, extraId, thirdId]);
+  await row(thirdId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(gameId), { targetPosition: { x: 140, y: 8 } });
+  await checkOrder([thirdId, gameId, extraId]);
+  await row(gameId).locator('.game-reorder-handle').press('Home');
+  await checkOrder([gameId, thirdId, extraId]);
+  await expect(row(gameId).locator('.game-reorder-handle')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await checkOrder([thirdId, gameId, extraId]);
+  await page.keyboard.press('ArrowUp');
+  await checkOrder([gameId, thirdId, extraId]);
+  await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('FROZEN');
+  await expect(page.locator('.catalog-game')).toHaveCount(2);
+  await row(extraId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(gameId), { targetPosition: { x: 140, y: 8 } });
+  await expect.poll(visibleOrder).toEqual([extraId, gameId]);
+  await idle();
+  await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('');
+  await checkOrder([extraId, thirdId, gameId]);
+  await page.reload();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  await checkOrder([extraId, thirdId, gameId]);
+  const handle = row(gameId).locator('.game-reorder-handle');
+  await handle.hover();
+  await page.mouse.down();
+  await row(extraId).hover();
+  await row(extraId).hover();
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(page.locator('[data-dragging], [data-drop-position]')).toHaveCount(0);
+  await checkOrder([extraId, thirdId, gameId]);
+  await row(gameId).locator('.game-reorder-handle').press('Home');
+  await checkOrder([gameId, extraId, thirdId]);
+  const lastRow = await row(thirdId).boundingBox();
+  assert(lastRow);
+  await row(gameId)
+    .locator('.game-reorder-handle')
+    .dragTo(row(thirdId), { targetPosition: { x: 140, y: lastRow.height - 8 } });
+  await checkOrder([extraId, thirdId, gameId]);
+  await row(gameId).locator('.game-reorder-handle').press('Home');
+  await checkOrder([gameId, extraId, thirdId]);
+  done(
+    'Native dragging of cards, rows and handles persists game order and synchronizes the sidebar; search retains hidden positions, selection survives, reload retains order, keyboard ordering works and Escape cancels without writes',
+  );
   await expect(page.getByRole('heading', { name: '你的世界，都在这里。', exact: true })).toBeVisible();
   done(
     'All Games is the default home and first workspace menu; the duplicate management menu is gone and both original presentation styles are available',
@@ -111,7 +203,9 @@ await runE2E('game-interactions', async (harness) => {
   assert.equal((await diskGames()).find((game) => game.id === gameId).subtitle, 'LOCAL CONFIGURATION');
   done('Editing a game from management saves settings and stays on the management page');
 
-  await row(gameId).getByRole('button', { name: '导出游戏 雪原之旅', exact: true }).click();
+  await row(gameId).getByRole('button', { name: '编辑游戏 雪原之旅' }).click();
+  await dialog.getByRole('button', { name: '导出游戏', exact: true }).click();
+  await expect(dialog.getByRole('checkbox', { name: '一并导出存档记录' })).not.toBeChecked();
   await dialog.getByRole('button', { name: '导出游戏', exact: true }).click();
   await idle();
   await expect(dialog).toHaveCount(0);
@@ -125,7 +219,9 @@ await runE2E('game-interactions', async (harness) => {
   const combined = path.join(destination, '雪原之旅-游戏导出 (2)', '雪原之旅');
   const combinedConfig = JSON.parse(await fs.readFile(path.join(combined, 'game.json'), 'utf8'));
   assert.equal(combinedConfig.snapshotCount, 4);
-  done('Real IPC exports configuration only by default and includes all four record types when explicitly checked');
+  done(
+    'Export from game settings reuses the same confirmation and real IPC as the catalog; configuration-only export is the default and all four record types are included when explicitly checked',
+  );
 
   await row(gameId).getByRole('button', { name: '删除游戏 雪原之旅', exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: '一并永久删除该游戏的全部存档记录' })).not.toBeChecked();
@@ -295,6 +391,17 @@ await runE2E('game-interactions', async (harness) => {
           .evaluateAll((rows) => rows.filter((row) => row.scrollWidth > row.clientWidth + 1).length),
         0,
       );
+      if (layout === 'list') {
+        await row(copy.id).getByRole('button', { name: '编辑游戏 雪原之旅 (2)', exact: true }).click();
+        await dialog.getByRole('button', { name: '导出游戏', exact: true }).scrollIntoViewIfNeeded();
+        await expect(dialog.getByRole('button', { name: '导出游戏', exact: true })).toBeInViewport();
+        assert(await dialog.locator('.dialog-actions').evaluate((footer) => footer.scrollWidth <= footer.clientWidth));
+        await page.screenshot({
+          path: path.join(screenshots, 'game-settings-' + theme + '-zh.png'),
+          animations: 'disabled',
+        });
+        await dialog.getByRole('button', { name: '取消', exact: true }).click();
+      }
     }
   }
   await page.getByRole('button', { name: '切换语言', exact: true }).click();
@@ -306,7 +413,12 @@ await runE2E('game-interactions', async (harness) => {
     'Each game is managed independently, giving every adventure its own space.',
   );
   await page.screenshot({ path: path.join(screenshots, 'all-games-heading-en.png'), animations: 'disabled' });
-  await row(copy.id).getByRole('button', { name: 'Export game 雪原之旅 (2)', exact: true }).click();
+  await row(copy.id).getByRole('button', { name: 'Edit game 雪原之旅 (2)', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Export Games', exact: true }).scrollIntoViewIfNeeded();
+  await expect(dialog.getByRole('button', { name: 'Export Games', exact: true })).toBeInViewport();
+  assert(await dialog.locator('.dialog-actions').evaluate((footer) => footer.scrollWidth <= footer.clientWidth));
+  await page.screenshot({ path: path.join(screenshots, 'game-settings-en.png'), animations: 'disabled' });
+  await dialog.getByRole('button', { name: 'Export Games', exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: 'Include save records', exact: true })).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.reload();

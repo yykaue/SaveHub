@@ -251,6 +251,7 @@ function registerHandlers() {
     updateApplicationMenu();
   });
   register('saveGame', (game) => activeStore.upsertGame(game));
+  register('reorderGames', (ids) => activeStore.reorderGames(ids));
   register('removeGame', (id, undo = false, deleteRecords = false) => activeStore.removeGame(id, undo, deleteRecords));
   register('exportGames', async (ids, includeSnapshots = false) => {
     const directory = await chooseFolder(t('dialogs.pickGameExportDir'));

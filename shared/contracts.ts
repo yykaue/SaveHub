@@ -161,6 +161,7 @@ export interface Bridge {
   setRestorePointRetention(value: RestorePointRetention): Promise<void>;
   setLogLimitMB(value: number): Promise<void>;
   saveGame(game: GameInput): Promise<string>;
+  reorderGames(ids: string[]): Promise<void>;
   removeGame(id: string, undo?: boolean, deleteRecords?: boolean): Promise<void>;
   exportGames(ids: string[], includeSnapshots?: boolean): Promise<(ExportResult & { snapshotCount: number }) | null>;
   importGames(): Promise<GameImportPlan | null>;

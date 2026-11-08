@@ -20,7 +20,9 @@ export function Logo({ small = false }: { small?: boolean }) {
 /** 游戏图标渲染组件：支持自定义 Base64 / savehub-icon:// 协议图片或内置 Lucide 矢量图标 */
 export function GameGlyph({ icon, size = 23 }: { icon: string; size?: number }) {
   if (icon.startsWith('data:image/') || icon.startsWith('savehub-icon://'))
-    return <img src={icon} alt="" className="custom-icon" width={size} height={size} loading="lazy" />;
+    return (
+      <img src={icon} alt="" className="custom-icon" width={size} height={size} loading="lazy" draggable={false} />
+    );
   const Icon =
     (
       {

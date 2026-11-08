@@ -483,6 +483,7 @@ export default function App() {
             {games.map((game) => (
               <button
                 key={game.id}
+                data-game-id={game.id}
                 className={current?.id === game.id && page === 'library' ? 'selected' : ''}
                 onClick={() => chooseGame(game.id)}
               >
@@ -645,6 +646,7 @@ export default function App() {
                   busy={!!busy}
                   onAdd={() => setModal({ type: 'game' })}
                   onImport={() => void runGameImport()}
+                  onReorder={(ids) => void perform(t('games.reordering'), () => api.reorderGames(ids))}
                   onExport={(selectedGames) => setModal({ type: 'export-games', games: selectedGames })}
                   onEdit={(game) => setModal({ type: 'game', game })}
                   onDelete={(game) => setModal({ type: 'remove-game', game })}
@@ -723,6 +725,7 @@ export default function App() {
                 if (id && page !== 'games') chooseGame(id);
               }}
               onDelete={modal.game ? () => setModal({ type: 'remove-game', game: modal.game! }) : undefined}
+              onExport={modal.game ? () => setModal({ type: 'export-games', games: [modal.game!] }) : undefined}
             />
           )}
           {modal.type === 'save' && current && (

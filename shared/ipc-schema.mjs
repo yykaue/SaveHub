@@ -93,6 +93,7 @@ export const IPC_SCHEMA = {
       count(/** @type {{ removed?: unknown }} */ (value).removed),
   ],
   saveGame: [gameInput],
+  reorderGames: [ids],
   removeGame: [id, optional(bool), optional(bool)],
   exportGames: [ids, optional(bool)],
   importGames: [],
