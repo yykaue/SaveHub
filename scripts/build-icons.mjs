@@ -3,18 +3,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { assertDesktopLaunchAllowed, desktopEnvironment } from './desktop-environment.mjs';
 
 const script = fileURLToPath(import.meta.url);
 const project = path.dirname(path.dirname(script));
 const sizes = [16, 24, 32, 48, 64, 128, 256];
 
 if (!process.versions.electron) {
+  await assertDesktopLaunchAllowed();
   const { default: executable } = await import('electron');
   const temporaryRoot = path.join(project, '.test-data');
   await fs.mkdir(temporaryRoot, { recursive: true });
   const profile = await fs.mkdtemp(path.join(temporaryRoot, 'icon-render-'));
-  const env = { ...process.env, SAVEHUB_ICON_DATA_DIR: profile };
-  delete env.ELECTRON_RUN_AS_NODE;
+  const env = desktopEnvironment({ ...process.env, SAVEHUB_ICON_DATA_DIR: profile });
   try {
     const child = spawn(executable, [script], { cwd: project, env, stdio: 'inherit', windowsHide: true });
     const timeout = setTimeout(() => {

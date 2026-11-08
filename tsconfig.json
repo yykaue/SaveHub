@@ -25,6 +25,7 @@
     "scripts/generate-preload.mjs",
     "scripts/checksums.mjs",
     "scripts/dev.mjs",
+    "scripts/start.mjs",
     "tests/contracts.ts",
     "tests/e2e",
     "playwright.config.ts"

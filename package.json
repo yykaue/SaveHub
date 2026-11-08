@@ -14,7 +14,7 @@
     "postinstall": "node node_modules/electron/install.js",
     "dev": "node scripts/dev.mjs",
     "dev:renderer": "vite --host 127.0.0.1",
-    "start": "electron .",
+    "start": "node scripts/start.mjs",
     "typecheck": "node node_modules/@typescript/native/bin/tsc --noEmit",
     "test": "node --test --test-timeout=60000 tests/*.test.mjs",
     "test:ui": "node scripts/smoke.mjs",

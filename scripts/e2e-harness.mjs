@@ -3,6 +3,7 @@ import electronPath from 'electron';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { assertDesktopLaunchAllowed, desktopEnvironment } from './desktop-environment.mjs';
 
 /**
  * 运行单个 E2E 测试套件并统一收集截图、Trace 与清理报告。
@@ -33,6 +34,7 @@ export async function runE2E(suite, action) {
  * @param {string} suite 套件名称
  */
 export async function createHarness(suite) {
+  await assertDesktopLaunchAllowed();
   const root = path.resolve('.test-data');
   await fs.mkdir(root, { recursive: true });
   const base = await fs.mkdtemp(path.join(root, `${suite}-`));
@@ -88,11 +90,7 @@ export async function createHarness(suite) {
     close,
     async launch(/** @type {string} */ dataDir) {
       await fs.access(executable); // 指定的打包产物若不存在必须直接报错，严禁静默回退到开发态源码运行
-      /** @type {Record<string,string>} */
-      const env = { SAVEHUB_DATA_DIR: dataDir };
-      for (const [key, value] of Object.entries(process.env))
-        if (value !== undefined && key !== 'SAVEHUB_DATA_DIR') env[key] = value;
-      delete env.ELECTRON_RUN_AS_NODE;
+      const env = desktopEnvironment({ ...process.env, SAVEHUB_DATA_DIR: dataDir });
       delete env.SAVEHUB_DEV_URL;
       const application = await electron.launch({
         executablePath: executable,

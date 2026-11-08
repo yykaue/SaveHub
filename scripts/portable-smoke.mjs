@@ -5,9 +5,11 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { SaveStore, atomicJson, within } from '../electron/storage.mjs';
+import { assertDesktopLaunchAllowed, desktopEnvironment } from './desktop-environment.mjs';
 
 // NSIS 便携版启动器不会直接向 Playwright 转发 Electron 调试输出；
 // 因此等待启动器解压运行后，通过 Chromium 生成的 DevToolsActivePort 文件建立 CDP 连接。
+await assertDesktopLaunchAllowed();
 const root = path.resolve('.test-data');
 await fs.mkdir(root, { recursive: true });
 const reused = process.env.SAVEHUB_PORTABLE_TEST_DATA;
@@ -44,8 +46,7 @@ const executable = path.resolve(
   packageInfo.build.directories.output,
   `SaveHub-${packageInfo.version}-Windows-x64-portable.exe`,
 );
-const env = { ...process.env, SAVEHUB_DATA_DIR: dataDir };
-delete env.ELECTRON_RUN_AS_NODE;
+const env = desktopEnvironment({ ...process.env, SAVEHUB_DATA_DIR: dataDir });
 delete env.SAVEHUB_DEV_URL;
 const child = spawn(
   executable,
