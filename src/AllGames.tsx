@@ -106,10 +106,12 @@ export function AllGames({
     );
   return (
     <div className="all-games" data-layout={view.layout}>
-      <div className="page-heading standalone">
-        <div className="eyebrow">A HOME FOR EVERY WORLD.</div>
-        <h1>{t('games.headingTitle')}</h1>
-        <p>{t('games.headingDesc')}</p>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">A HOME FOR EVERY WORLD.</div>
+          <h1>{t('games.headingTitle')}</h1>
+          <p>{t('games.headingDesc')}</p>
+        </div>
       </div>
       <div className="management-actions">
         <button className="button primary" disabled={busy} onClick={onAdd}>

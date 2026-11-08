@@ -1317,15 +1317,6 @@ select option {
   font-size: 10px;
   letter-spacing: 1px;
 }
-.standalone {
-  display: block;
-  margin: 13px 0 35px;
-}
-.standalone h1 {
-  font-size: 30px;
-  margin-top: 10px;
-  margin-bottom: 9px;
-}
 .game-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -67,7 +67,7 @@ await runE2E('game-interactions', async (harness) => {
   await expect(navigation.getByRole('button', { name: '游戏管理', exact: true })).toHaveCount(0);
   await expect(page.locator('[data-page="games"]')).toBeVisible();
   await expect(page.getByRole('heading', { name: '你的世界，都在这里。', exact: true })).toBeVisible();
-  await expect(page.locator('.all-games .page-heading > p')).toHaveText('每个游戏独立管理，让不同的冒险各得其所。');
+  await expect(page.locator('.all-games .page-heading p')).toHaveText('每个游戏独立管理，让不同的冒险各得其所。');
   await expect(page.locator('.all-games')).toHaveAttribute('data-layout', 'cards');
   await expect(page.locator('.game-card.catalog-game')).toHaveCount(3);
   const visibleOrder = () => page.locator('.catalog-game').evaluateAll((rows) => rows.map((row) => row.dataset.gameId));
@@ -409,7 +409,7 @@ await runE2E('game-interactions', async (harness) => {
   await expect(page.getByRole('button', { name: 'All Games', exact: true })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByRole('heading', { name: 'All Your Worlds, Right Here.', exact: true })).toBeVisible();
-  await expect(page.locator('.all-games .page-heading > p')).toHaveText(
+  await expect(page.locator('.all-games .page-heading p')).toHaveText(
     'Each game is managed independently, giving every adventure its own space.',
   );
   await page.screenshot({ path: path.join(screenshots, 'all-games-heading-en.png'), animations: 'disabled' });
@@ -432,7 +432,7 @@ await runE2E('game-interactions', async (harness) => {
   await idle();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.getByRole('heading', { name: '你的世界，都在这里。', exact: true })).toBeVisible();
-  await expect(page.locator('.all-games .page-heading > p')).toHaveText('每个游戏独立管理，让不同的冒险各得其所。');
+  await expect(page.locator('.all-games .page-heading p')).toHaveText('每个游戏独立管理，让不同的冒险各得其所。');
   await expect(
     page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button').first(),
   ).toHaveAccessibleName('全部游戏');

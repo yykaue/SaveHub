@@ -43,10 +43,12 @@ export function SettingsPage({
 }) {
   return (
     <>
-      <div className="page-heading standalone">
-        <div className="eyebrow">YOUR SAVES. YOUR DEVICE.</div>
-        <h1>{t('settings.headingTitle')}</h1>
-        <p>{t('settings.headingDesc')}</p>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">YOUR SAVES. YOUR DEVICE.</div>
+          <h1>{t('settings.headingTitle')}</h1>
+          <p>{t('settings.headingDesc')}</p>
+        </div>
       </div>
       <section className="settings-card">
         <h2>
