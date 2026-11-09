@@ -186,6 +186,8 @@ pnpm test:ui             # Electron E2E smoke test & 4-theme screenshots
 pnpm test:interactions   # Theme return, batch actions, badges, sorting & transitions
 pnpm test:deletion       # Batch recover, permanent delete & interrupted purge retry
 pnpm test:import         # Per-item duplicate import resolution, mixed batch, cancel & 4 themes
+pnpm test:games          # All Games drag reorder, card/list toggle, 2-stage import/export & permanent delete
+pnpm test:retention      # Dual-queue restore point retention, oversized batch rejection & zero-limit disabling
 pnpm test:optimizations  # Overwrite state badges, log capacity, transfer progress and restore reminders
 pnpm pack:win            # Windows unpacked directory build
 pnpm dist:win            # Windows NSIS installer + single-file portable executable
@@ -223,13 +225,26 @@ src/art.tsx                Local SVG illustrations & game emblems
 src/styles.css             Layout, form & modal styling
 src/list.css               Save list, batch action bar, restore points & transition styling
 src/themes.css             Four complete visual themes
+tests/contracts.ts         Compile-time cross-process IPC contract & type checks
 tests/storage.test.mjs     Filesystem operations & transactional recovery unit/integration tests
+tests/games.test.mjs       Game reordering, import/export, conflict resolution & full vault purge tests
 tests/import.test.mjs      Mixed import, overwrite rollback & real child-process crash recovery tests
+tests/optimization.test.mjs Overwrite state matrix, post-import retention pruning, progress & log capacity tests
+tests/remediation.test.mjs Corrupt transaction isolation, recovery boundary table, IPC schema & disk budget tests
+tests/e2e/desktop.spec.ts  Playwright desktop E2E runner entry point
 scripts/smoke.mjs          Electron E2E smoke check on an isolated test vault
 scripts/interactions.mjs   Theme return, selection sorting, batch file operations & state semantics
 scripts/deletion-interactions.mjs Real recovery, permanent deletion & retry for Recycle Bin / Restore Points
 scripts/import-interactions.mjs Duplicate import resolution, cancellation & 4-theme UI verification
+scripts/game-interactions.mjs All Games drag reorder, view switching, 2-stage import/export & permanent delete
+scripts/retention-interactions.mjs Dual-queue retention, batch recovery limits & fresh empty library checks
+scripts/optimization-interactions.mjs Local state badges, progress bar, log capacity & restore warning checks
 scripts/portable-smoke.mjs Real launch & save/restore verification for the single-file portable EXE
+scripts/test-package.mjs   Packaged application E2E regression entry point for the current platform
+scripts/test-apfs.mjs      Apple Silicon case-sensitive & case-insensitive APFS disk image verification
+scripts/test-installer.ps1 Windows NSIS installation, installed-app regression & uninstall verification
+scripts/benchmark.mjs      Summary-cache & real-payload I/O performance benchmark
+scripts/benchmark-ui.mjs   UI performance benchmark with 100 / 1,000 / 10,000 summaries
 scripts/audit-release.mjs  Packaged ASAR source comparison & SHA-256 release digest audit
 scripts/e2e-harness.mjs   E2E launch, target identity, trace, report and cleanup
 test-results/             Per-run reports, screenshots and trace archives

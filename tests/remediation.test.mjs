@@ -32,6 +32,7 @@ test('unidentified corrupt transactions retain safety dependencies under 0/0 acr
 test('E2E evidence failure never replaces the original business assertion', async () => {
   const original = new Error('original-business-failure');
   const write = fs.writeFile;
+  const created = [];
   fs.writeFile = async (file, ...args) => {
     if (String(file).endsWith('run.json')) throw new Error('injected-report-failure');
     return write(file, ...args);
@@ -39,7 +40,8 @@ test('E2E evidence failure never replaces the original business assertion', asyn
   syncBuiltinESMExports();
   try {
     await assert.rejects(
-      runE2E('harness-fault', async () => {
+      runE2E('harness-fault', async (harness) => {
+        created.push(harness.base, harness.screenshots);
         throw original;
       }),
       (error) => error === original,
@@ -47,15 +49,19 @@ test('E2E evidence failure never replaces the original business assertion', asyn
   } finally {
     fs.writeFile = write;
     syncBuiltinESMExports();
+    if (!process.env.SAVEHUB_KEEP_TEST_DATA)
+      for (const dir of created) await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
 test('a nonexistent requested E2E executable is rejected without source fallback', async () => {
   const previous = process.env.SAVEHUB_TEST_EXECUTABLE;
+  const created = [];
   process.env.SAVEHUB_TEST_EXECUTABLE = path.resolve('.test-data', 'does-not-exist.exe');
   try {
     await assert.rejects(
       runE2E('invalid-target', async (harness) => {
+        created.push(harness.base, harness.screenshots);
         await harness.launch(path.join(harness.base, 'data'));
       }),
       { code: 'ENOENT' },
@@ -63,6 +69,8 @@ test('a nonexistent requested E2E executable is rejected without source fallback
   } finally {
     if (previous === undefined) delete process.env.SAVEHUB_TEST_EXECUTABLE;
     else process.env.SAVEHUB_TEST_EXECUTABLE = previous;
+    if (!process.env.SAVEHUB_KEEP_TEST_DATA)
+      for (const dir of created) await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
@@ -137,6 +145,9 @@ test('IPC contracts reject malformed arguments before dispatch and accept zero r
   );
   assert(!validArguments('saveGame', [{ name: 'Game', locations: { win32: { root: 'C:/saves', items: [123] } } }]));
   assert(!validArguments('deleteSnapshots', ['../outside', ['record']]));
+  assert(validArguments('reorderGames', [['elden-ring', 'sekiro']]));
+  assert(!validArguments('reorderGames', [[]]));
+  assert(!validArguments('reorderGames', [['../outside']]));
   assert(!validArguments('state', [true]));
   assert(validArguments('removeGame', ['game']));
   assert(Object.keys(IPC_SCHEMA).includes('executeGameImport'));

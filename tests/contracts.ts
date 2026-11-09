@@ -6,6 +6,9 @@ declare const api: Bridge;
 api.setRestorePointRetention({ active: 0, removed: 15 });
 // @ts-expect-error 保留策略数值字段严禁传入字符串
 api.setRestorePointRetention({ active: '5', removed: 15 });
+api.reorderGames(['elden-ring', 'sekiro']);
+// @ts-expect-error 游戏排序必须传入字符串 ID 数组
+api.reorderGames('elden-ring');
 // @ts-expect-error 所有命令名称必须存在于共享契约中
 const invalid: CommandName = 'purgeEverything';
 // @ts-expect-error 成功结果分支不能包含 error 字段而缺失 data

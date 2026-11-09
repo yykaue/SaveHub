@@ -184,6 +184,8 @@ pnpm test:ui             # Electron 端到端测试、四主题截图
 pnpm test:interactions   # 主题返回、批量操作、标记、排序与过渡验证
 pnpm test:deletion       # 回收站和恢复点的批量找回、物理删除及中断重试
 pnpm test:import         # 重复导入的逐项选择、混合执行、取消与四主题界面
+pnpm test:games          # 全部游戏拖拽排序、卡片/列表切换、两阶段导入导出与彻底删除
+pnpm test:retention      # 双队列恢复点保留策略、超限拦截与 0 容量禁用验证
 pnpm test:optimizations  # 覆盖状态提醒、日志容量、导入导出进度和无勾选读档提示
 pnpm pack:win            # Windows 解包版
 pnpm dist:win            # Windows 安装版 + 便携版
@@ -221,13 +223,26 @@ src/art.tsx               本地 SVG 场景与游戏图形
 src/styles.css            布局与交互样式
 src/list.css              列表、批量操作、恢复点和过渡样式
 src/themes.css            四套完整视觉主题
+tests/contracts.ts        编译期跨进程 IPC 契约与类型检查
 tests/storage.test.mjs    文件操作与恢复机制测试
+tests/games.test.mjs      游戏排序、导入导出、冲突处理与整库彻底清理测试
 tests/import.test.mjs     混合导入、覆盖回滚和真实进程中断恢复测试
+tests/optimization.test.mjs 覆盖状态矩阵、导入后保留整理、进度单调性与日志容量测试
+tests/remediation.test.mjs 损坏事务隔离、恢复边界表、IPC 参数校验与空间预算测试
+tests/e2e/desktop.spec.ts Playwright 桌面端到端测试运行器入口
 scripts/smoke.mjs          独立测试资料库上的 Electron 端到端检查
 scripts/interactions.mjs  主题返回、选择排序、批量文件操作与状态语义检查
 scripts/deletion-interactions.mjs 回收站与恢复点的实际找回、删除和重试
 scripts/import-interactions.mjs 重复导入、取消、逐项处理与四主题界面验证
+scripts/game-interactions.mjs 全部游戏拖拽排序、视图切换、两阶段导入导出与彻底清理
+scripts/retention-interactions.mjs 恢复点双队列保留、批量找回上限与空库初始化验证
+scripts/optimization-interactions.mjs 本地状态提醒、进度条、日志容量与读档警告验证
 scripts/portable-smoke.mjs 单文件便携版的实际启动与存读档检查
+scripts/test-package.mjs  针对当前平台打包产物的端到端回归入口
+scripts/test-apfs.mjs     Apple Silicon 大小写敏感/不敏感 APFS 磁盘映像验证
+scripts/test-installer.ps1 Windows NSIS 安装、已安装程序回归与卸载验证
+scripts/benchmark.mjs     存储摘要缓存与真实 payload 读写性能基准
+scripts/benchmark-ui.mjs  100 / 1,000 / 10,000 条摘要的界面性能基准
 scripts/audit-release.mjs  包内源码与发行文件摘要核对
 scripts/e2e-harness.mjs   E2E 启动、程序身份、trace、报告与清理
 test-results/            分次测试报告、截图和 trace
