@@ -81,47 +81,58 @@ await runE2E('game-interactions', async (harness) => {
       .toEqual(ids);
     await idle();
   };
-  await row(thirdId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(gameId), { targetPosition: { x: 8, y: 80 } });
+  // Playwright 的 dragTo 在按下鼠标之后才把目标滚入视口；窗口较小（CI 常被压到 1060×720）时，该滚动会让
+  // Blink 按旧的按下坐标重新命中，拖起错误的卡片。因此先在原地按下并轻移以启动拖拽，再移向目标。
+  const pressAndNudge = async (source, sourcePosition) => {
+    await source.hover({ position: sourcePosition });
+    const box = await source.boundingBox();
+    assert(box);
+    const x = box.x + (sourcePosition?.x ?? box.width / 2);
+    const y = box.y + (sourcePosition?.y ?? box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(x < box.x + box.width / 2 ? x + 10 : x - 10, y);
+  };
+  const drag = async (source, target, { sourcePosition, targetPosition } = {}) => {
+    await pressAndNudge(source, sourcePosition);
+    await target.hover({ position: targetPosition });
+    await page.mouse.up();
+  };
+  // 固定为最小窗口（卡片两列且第三张需滚动），与 CI 小屏一致，使本地与 CI 走同一条布局路径。
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1060, 720));
+  await drag(row(thirdId).locator('.game-reorder-handle'), row(gameId), { targetPosition: { x: 8, y: 80 } });
   await checkOrder([thirdId, gameId, extraId]);
   const lastCard = await row(extraId).boundingBox();
   assert(lastCard);
-  await row(thirdId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(extraId), { targetPosition: { x: lastCard.width - 8, y: 80 } });
+  await drag(row(thirdId).locator('.game-reorder-handle'), row(extraId), {
+    targetPosition: { x: lastCard.width - 8, y: 80 },
+  });
   await checkOrder([gameId, extraId, thirdId]);
-  await row(thirdId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(gameId), { targetPosition: { x: 8, y: 80 } });
+  await drag(row(thirdId).locator('.game-reorder-handle'), row(gameId), { targetPosition: { x: 8, y: 80 } });
   await checkOrder([thirdId, gameId, extraId]);
   await page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true }).check();
-  await row(extraId)
-    .locator('.game-card-art')
-    .dragTo(row(thirdId), { sourcePosition: { x: 90, y: 80 }, targetPosition: { x: 8, y: 80 } });
+  await drag(row(extraId).locator('.game-card-art'), row(thirdId), {
+    sourcePosition: { x: 90, y: 80 },
+    targetPosition: { x: 8, y: 80 },
+  });
   await checkOrder([extraId, thirdId, gameId]);
-  await row(gameId)
-    .getByRole('button', { name: '进入存档库', exact: true })
-    .dragTo(row(extraId), { targetPosition: { x: 8, y: 80 } });
+  await drag(row(gameId).getByRole('button', { name: '进入存档库', exact: true }), row(extraId), {
+    targetPosition: { x: 8, y: 80 },
+  });
   await checkOrder([extraId, thirdId, gameId]);
-  await row(extraId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(thirdId), { targetPosition: { x: 8, y: 80 } });
+  await drag(row(extraId).locator('.game-reorder-handle'), row(thirdId), { targetPosition: { x: 8, y: 80 } });
   await checkOrder([thirdId, extraId, gameId]);
-  await row(extraId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(thirdId), { targetPosition: { x: lastCard.width - 8, y: 80 } });
+  await drag(row(extraId).locator('.game-reorder-handle'), row(thirdId), {
+    targetPosition: { x: lastCard.width - 8, y: 80 },
+  });
   await checkOrder([extraId, thirdId, gameId]);
   await expect(page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true })).toBeChecked();
   await page.getByRole('checkbox', { name: '选择游戏 雪原之旅', exact: true }).uncheck();
   await page.getByRole('button', { name: '列表视图', exact: true }).click();
   await expect(page.locator('.management-game')).toHaveCount(3);
   await expect.poll(visibleOrder).toEqual([extraId, thirdId, gameId]);
-  await row(gameId).dragTo(row(extraId), { sourcePosition: { x: 140, y: 18 }, targetPosition: { x: 140, y: 8 } });
+  await drag(row(gameId), row(extraId), { sourcePosition: { x: 140, y: 18 }, targetPosition: { x: 140, y: 8 } });
   await checkOrder([gameId, extraId, thirdId]);
-  await row(thirdId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(gameId), { targetPosition: { x: 140, y: 8 } });
+  await drag(row(thirdId).locator('.game-reorder-handle'), row(gameId), { targetPosition: { x: 140, y: 8 } });
   await checkOrder([thirdId, gameId, extraId]);
   await row(gameId).locator('.game-reorder-handle').press('Home');
   await checkOrder([gameId, thirdId, extraId]);
@@ -132,9 +143,7 @@ await runE2E('game-interactions', async (harness) => {
   await checkOrder([gameId, thirdId, extraId]);
   await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('FROZEN');
   await expect(page.locator('.catalog-game')).toHaveCount(2);
-  await row(extraId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(gameId), { targetPosition: { x: 140, y: 8 } });
+  await drag(row(extraId).locator('.game-reorder-handle'), row(gameId), { targetPosition: { x: 140, y: 8 } });
   await expect.poll(visibleOrder).toEqual([extraId, gameId]);
   await idle();
   await page.getByRole('textbox', { name: '搜索游戏名称或副标题' }).fill('');
@@ -142,9 +151,7 @@ await runE2E('game-interactions', async (harness) => {
   await page.reload();
   await expect(page.locator('.app-shell')).toBeVisible();
   await checkOrder([extraId, thirdId, gameId]);
-  const handle = row(gameId).locator('.game-reorder-handle');
-  await handle.hover();
-  await page.mouse.down();
+  await pressAndNudge(row(gameId).locator('.game-reorder-handle'));
   await row(extraId).hover();
   await row(extraId).hover();
   await page.keyboard.press('Escape');
@@ -155,9 +162,9 @@ await runE2E('game-interactions', async (harness) => {
   await checkOrder([gameId, extraId, thirdId]);
   const lastRow = await row(thirdId).boundingBox();
   assert(lastRow);
-  await row(gameId)
-    .locator('.game-reorder-handle')
-    .dragTo(row(thirdId), { targetPosition: { x: 140, y: lastRow.height - 8 } });
+  await drag(row(gameId).locator('.game-reorder-handle'), row(thirdId), {
+    targetPosition: { x: 140, y: lastRow.height - 8 },
+  });
   await checkOrder([extraId, thirdId, gameId]);
   await row(gameId).locator('.game-reorder-handle').press('Home');
   await checkOrder([gameId, extraId, thirdId]);
