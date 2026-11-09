@@ -509,6 +509,26 @@ test('existing path containment uses filesystem identity', async (t) => {
   if (process.platform === 'win32') assert(await withinOnDisk(f.source.toUpperCase(), path.join(f.source, 'save.dat')));
 });
 
+test('missing paths use lexical containment when filesystem identities are unavailable', async (t) => {
+  const f = await fixture(t);
+  const originalLstat = fs.lstat;
+  t.after(() => {
+    fs.lstat = originalLstat;
+    syncBuiltinESMExports();
+  });
+  fs.lstat = async (...args) => {
+    const stat = await originalLstat(...args);
+    return new Proxy(stat, {
+      get(target, key, receiver) {
+        return key === 'ino' ? 0 : Reflect.get(target, key, receiver);
+      },
+    });
+  };
+  syncBuiltinESMExports();
+  assert(!(await withinOnDisk(f.store.dataDir, path.join(f.source, 'missing.dat'), 'win32')));
+  assert(await withinOnDisk(f.store.dataDir, path.join(f.store.dataDir, 'missing.dat'), 'win32'));
+});
+
 async function logFiles(directory) {
   const result = [];
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
