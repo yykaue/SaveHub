@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
-if (-not $IsWindows) { throw 'Installer verification requires Windows PowerShell 7.' }
+if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) { throw 'Installer verification requires Windows.' }
 $workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$package = Get-Content -LiteralPath (Join-Path $workspace 'package.json') -Raw | ConvertFrom-Json
+$package = Get-Content -LiteralPath (Join-Path $workspace 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $installer = Join-Path $workspace ($package.build.directories.output + '/SaveHub-' + $package.version + '-win-x64.exe')
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Build the Windows installer first.' }
 $registryRoots = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
