@@ -159,11 +159,11 @@ async function isCaseInsensitiveDir(dirPath, dirStat, platform) {
  */
 export async function withinOnDisk(root, target, platform = process.platform) {
   const rootStat = await statMaybe(root);
-  if (rootStat) {
+  if (rootStat?.ino) {
     let current = path.resolve(target);
     while (true) {
       const stat = await statMaybe(current);
-      if (stat && stat.dev === rootStat.dev && stat.ino === rootStat.ino) return true;
+      if (stat?.ino && stat.dev === rootStat.dev && stat.ino === rootStat.ino) return true;
       const parent = path.dirname(current);
       if (parent === current) return false;
       current = parent;
@@ -171,7 +171,7 @@ export async function withinOnDisk(root, target, platform = process.platform) {
   }
   const rootResolved = await resolveExistingAncestor(root);
   const targetResolved = await resolveExistingAncestor(target);
-  if (!rootResolved.stat || !targetResolved.stat) return within(root, target, platform);
+  if (!rootResolved.stat?.ino || !targetResolved.stat?.ino) return within(root, target, platform);
   if (
     targetResolved.stat.dev !== rootResolved.stat.dev ||
     targetResolved.stat.ino !== rootResolved.stat.ino ||
