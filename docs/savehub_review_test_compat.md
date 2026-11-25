@@ -2,7 +2,8 @@
 
 - 审查基线：`main@535eddc`（工作区干净）
 - 审查日期：2026-11-11 ~ 2026-11-18
-- 审查环境：macOS / Apple Silicon（`arm64`）、Node `v24.21.0`；Windows 部分为静态审查（本机无 Windows 环境，标注「待 Windows 实测」的条目需在 Windows 上复核）
+- 审查环境：macOS / Apple Silicon（`arm64`）、Node `v24.21.0`；Windows 部分最初为静态审查
+- Windows 复核：2026-11-22，Windows 11 Pro 24H2（10.0.26200，x64）、Node `v24.22.2`、Windows PowerShell 5.1，基线 `main@56dfcb1`（相对 `535eddc` 仅新增本文档）。实测结论、更正项与新增问题见 **第 7 节**；原文中「待 Windows 实测」的条目已在第 7 节逐条给出结论
 - 与历史文档关系：`docs/savehub_review_1.1.5.md`、`docs/savehub_review_followup.md` 已覆盖的问题本文不重复，只在仍有残留时注明
 
 ---
@@ -21,6 +22,8 @@
 | 源码 E2E（Apple Silicon） | `playwright test`（7 个套件） | 7/7 通过，2.5 分钟 |
 | 打包产物 E2E / 便携版 / 安装器 / APFS 卷 | `test-package` / `test:portable` / `test-installer.ps1` / `test-apfs` | **未执行**（需打包或 Windows 环境） |
 
+> Windows 上的同组检查结果见 [7.1 Windows 实际执行结果](#71-windows-实际执行结果)：源码级与打包产物回归全部通过；安装器回归被脚本自带的保护条件拦下，未执行。
+
 > [!NOTE]
 > 结论：当前代码在 macOS Apple Silicon 上的源码级回归全部通过。但「全部通过」只说明现有用例没发现问题。下面列的问题里，有几条现有用例本来就不可能发现（例如 Windows 高 DPI 窗口尺寸、macOS 下 `Icon\r` 文件名、Windows 上 `rename` 被占用）。
 
@@ -28,16 +31,21 @@
 
 ## 1. 结论摘要（建议优先处理）
 
-| 编号 | 优先级 | 问题 | 平台 |
-| --- | --- | --- | --- |
-| C1 | P1 | 读档事务中的目录 `rename` 没有 EPERM/EBUSY 重试，回滚失败会直接锁住这款游戏 | Windows |
-| C2 | P1 | 存档根目录的任一上级目录是符号链接或目录联接（Junction）时，整个游戏都无法使用 | 双平台 |
-| C3 | P1 | 窗口默认 1440×960、最小 1060×720，超出常见 Windows 高 DPI 笔记本（例如 1080p@150% 工作区约 1280×672）的可用区域 | Windows / 小屏 Mac |
-| C4 | P1 | 跨平台文件名校验先做了 `trim()`，`Icon\r`、`save␠` 这类在 Windows 上非法的名字能通过；`.DS_Store` 等系统文件也会被备份 | macOS → Windows |
-| C5 | P2 | macOS 关闭窗口后再触发 `second-instance` 时，会访问已销毁的 `BrowserWindow`，抛出异常 | macOS |
-| T1 | P1 | PR 只在 Windows 上做检查；macOS 只在 push 到 main/tag 时验证 | CI |
-| T2 | P2 | 64 处断言用中文错误文案正则匹配，E2E 选择器也硬编码中文；改文案或换默认语言会大面积误报 | 测试 |
-| T3 | P2 | `errors.mjs` 覆盖率只有 50%，OS 错误映射（EPERM/EBUSY/ENOSPC）完全没测；读档回滚失败（熔断）分支也没测 | 测试 |
+| 编号 | 优先级 | 问题 | 平台 | Windows 实测（第 7 节） |
+| --- | --- | --- | --- | --- |
+| C1 | P1 | 读档事务中的目录 `rename` 没有 EPERM/EBUSY 重试，回滚失败会直接锁住这款游戏 | Windows | **已复现**：游戏持有存档时读档 37 ms 内失败；回滚被占用时游戏被熔断，需重启 |
+| C2 | P1 | 存档根目录的任一上级目录是符号链接或目录联接（Junction）时，整个游戏都无法使用 | 双平台 | **已复现，影响更大**：数据目录位于 Junction 下时应用**无法启动** |
+| C3 | P1 | 窗口默认 1440×960、最小 1060×720，超出常见 Windows 高 DPI 笔记本（例如 1080p@150% 工作区约 1280×672）的可用区域 | Windows / 小屏 Mac | **已复现**（模拟缩放）：窗口底部超出工作区，且无法缩小 |
+| C4 | P1 | 跨平台文件名校验先做了 `trim()`，`Icon\r`、`save␠` 这类在 Windows 上非法的名字能通过；`.DS_Store` 等系统文件也会被备份 | macOS → Windows | **已复现，需更正**：Node 走 `\\?\` 路径，结尾带空格的文件名会原样写入，读档仍显示成功 |
+| C5 | P2 | macOS 关闭窗口后再触发 `second-instance` 时，会访问已销毁的 `BrowserWindow`，抛出异常 | macOS | 不涉及（Windows 关闭最后一个窗口即退出） |
+| T1 | P1 | PR 只在 Windows 上做检查；macOS 只在 push 到 main/tag 时验证 | CI | 补充：Windows 覆盖率里 `fs-utils.mjs#L137-L153`（darwin 分支）为 0 |
+| T2 | P2 | 64 处断言用中文错误文案正则匹配，E2E 选择器也硬编码中文；改文案或换默认语言会大面积误报 | 测试 | — |
+| T3 | P2 | `errors.mjs` 覆盖率只有 50%，OS 错误映射（EPERM/EBUSY/ENOSPC）完全没测；读档回滚失败（熔断）分支也没测 | 测试 | Windows 同为 50%；第 7.3 节给出可直接改成用例的复现方式 |
+| C12 | P1 | 读档回滚后 `.savehub-restore-*` 暂存目录（内含整份快照副本）永久留在游戏存档目录，启动恢复也不清理 | 双平台（Windows 触发频繁） | **新增，已复现** |
+| C13 | P2 | 保留名校验漏掉 `COM¹-³`、`LPT¹-³`、`CONIN$`、`CONOUT$`，文件名校验的报错文案对子文件有误导 | Windows | **新增，已复现** |
+| C14 | P3 | NTFS 上 `stat.ino` 超过 2^53，用 Number 比较身份会丢精度 | Windows | **新增，已复现**（4110 个样本中 118 个超出） |
+| E6 | P2 | 版本号未变时重新 `dist:win`，会覆盖 `release/<version>` 下已发布的安装包，`SHA256SUMS.txt` 和审计 JSON 随之失效 | 工程化 | **新增，本次复核中实际发生** |
+| T8 | P3 | Windows 本地复跑门槛：PowerShell 执行策略拦下 `pnpm`；文档命令只有 bash 版；安装器回归在开发机上无法运行 | 测试 / 文档 | **新增** |
 
 ---
 
@@ -144,13 +152,13 @@
 #### C6 · P2 · Windows 标题栏覆盖层颜色固定，不随主题变化
 
 - 证据：[main.mjs#L142-L146](file:///Users/limbo/Workspace/Myself/SaveHub/electron/main.mjs#L142-L146) `backgroundColor:'#f6f5f0'`，`titleBarOverlay.symbolColor:'#75786d'`。全工程没有调用 `setTitleBarOverlay`；而 `cyber` 主题的背景是 `#111220`（[themes.css#L150-L152](file:///Users/limbo/Workspace/Myself/SaveHub/src/themes.css#L150-L152)）。
-- 影响：深色主题下，右上角最小化/最大化/关闭按钮的颜色与悬停色都和主题不协调；启动时会先闪一下浅色底。`'#f6f5f000'` 这种带 alpha 的 overlay 颜色在 Windows 上的渲染效果需要实测（**待 Windows 实测**）。
+- 影响：深色主题下，右上角最小化/最大化/关闭按钮的颜色与悬停色都和主题不协调；启动时会先闪一下浅色底。`'#f6f5f000'` 这种带 alpha 的 overlay 颜色在 Windows 上的渲染效果需要实测（**Windows 已实测**：透明正常，见第 7.2 节，Windows 侧降为 P3）。
 - 建议：`setTheme` 成功后由主进程调用 `window.setTitleBarOverlay({ color, symbolColor })` 和 `setBackgroundColor()`；颜色表与 `themes.css` 共用一份常量。
 
 #### C7 · P2 · 自定义图标对话框允许选择 WebP，但 Windows 上 `nativeImage` 不支持
 
 - 证据：[main.mjs#L273-L277](file:///Users/limbo/Workspace/Myself/SaveHub/electron/main.mjs#L273-L277) 过滤器包含 `webp`/`ico`，随后调用 `nativeImage.createFromPath`。Electron 文档说明 `nativeImage` 在全平台只保证 PNG/JPEG，Windows 额外支持 ICO。
-- 影响：Windows 用户选择 `.webp` 时会得到「图片无效」。macOS 能否加载 WebP/ICO 取决于系统解码器，行为可能不一致（**需双平台实测**）。
+- 影响：Windows 用户选择 `.webp` 时会得到「图片无效」。macOS 能否加载 WebP/ICO 取决于系统解码器，行为可能不一致（**Windows 已实测**：WebP 返回空图，PNG/ICO 正常；macOS 仍待实测）。
 - 建议：过滤器只保留 `png/jpg/jpeg`（Windows 加 `ico`）；或者在渲染进程用 `<img>` + `canvas` 解码后转成 PNG dataURL，再交给主进程校验。
 
 #### C8 · P2 · 「便携版」并不便携
@@ -277,14 +285,14 @@
 
 ```mermaid
 flowchart LR
-  A["第 1 批：数据安全<br/>C1 rename 重试<br/>C4 文件名与忽略表<br/>Q1 fsync"] --> B["第 2 批：可用性<br/>C2 根目录 realpath<br/>C3 窗口自适应<br/>C5 second-instance"]
+  A["第 1 批：数据安全<br/>C1 rename 重试<br/>C4 文件名与忽略表<br/>C12 回滚暂存清理<br/>Q1 fsync"] --> B["第 2 批：可用性<br/>C2 根目录 realpath<br/>C3 窗口自适应<br/>C5 second-instance<br/>C13 保留名"]
   B --> C["第 3 批：测试体系<br/>T1 CI 双平台矩阵<br/>T3 补关键错误路径<br/>T2 断言改 code"]
   C --> D["第 4 批：体验与性能<br/>C6 C7 C10 C11<br/>4.2 state 按需拉取<br/>日志器"]
 ```
 
 每一批的完成标准：
 
-1. 第 1 批：新增第 2.2 节表中「回滚失败熔断」「Windows 读档 rename 被占用」「非法子文件名」三条用例，且在 Windows CI 上通过。
+1. 第 1 批：新增第 2.2 节表中「回滚失败熔断」「Windows 读档 rename 被占用」「非法子文件名」三条用例，以及第 7.3 节的「回滚后暂存目录清理」用例，且在 Windows CI 上通过。
 2. 第 2 批：在 Windows 用 Junction 迁移目录、macOS 用 `/tmp` 下的根目录，都能完成备份和恢复；1280×640 视口的 E2E 无溢出。
 3. 第 3 批：PR 在两个平台都运行 smoke；`errors.mjs` 覆盖率 ≥ 90%；中文正则断言降到 0。
 4. 第 4 批：用 `scripts/benchmark.mjs` 对比改动前后，`state()` 在 50 款游戏 × 200 个快照下的耗时下降，并记录数据。
@@ -307,4 +315,129 @@ pnpm build && pnpm test:e2e
 pnpm dist:mac && node scripts/test-package.mjs && node scripts/test-apfs.mjs      # macOS arm64
 pnpm dist:win && node scripts/test-package.mjs && pnpm test:portable \
   && pwsh -NoProfile -File scripts/test-installer.ps1                              # Windows x64
+```
+
+> Windows（PowerShell 5.1）下的等价命令见 [7.5 Windows 复跑命令](#75-windows-复跑命令)。
+
+---
+
+## 7. Windows 实测复核（2026-11-22）
+
+- 环境：Windows 11 Pro 24H2（10.0.26200）x64，2 台 2560×1440 显示器（100% 缩放，主屏工作区 2560×1392），NTFS，`LongPathsEnabled=0`，Node `v24.22.2`，pnpm `11.25.0`，Windows PowerShell 5.1（未安装 `pwsh`）。
+- 基线：`main@56dfcb1`，工作区干净。
+- 方法：除了跑仓库自带的检查，还在仓库外写了几个临时探针脚本（未提交），在 `.test-data/` 下的隔离目录里直接调用 `SaveStore` / `fs-utils`，并通过 Playwright `_electron` 驱动源码版应用，复现文中的问题。所有夹具都已清理，没有碰真实游戏数据或用户资料库。
+- 本节链接指向 Windows 工作区路径；前面各节保留原 macOS 路径，行号一致。
+
+### 7.1 Windows 实际执行结果
+
+| 检查项 | 命令 | 结果 |
+| --- | --- | --- |
+| 单元测试 | `node --test --test-timeout=60000 tests/*.test.mjs` | 147/147 通过，约 8.1s |
+| 单元测试覆盖率 | `--experimental-test-coverage`（electron/、shared/） | 行 93.99% / 分支 88.04% / 函数 94.29%；`errors.mjs` 仍为 50%；`restore-transaction.mjs` 未覆盖段与 macOS 相同（L184-194、L248-251）；`fs-utils.mjs` L137-153（`isCaseInsensitiveDir` 的 darwin 分支）在 Windows 上为 0 |
+| 类型检查 / ESLint / Prettier / IPC 契约 | `pnpm typecheck` / `lint` / `format:check` / `check:contracts` | 全部通过 |
+| 渲染进程构建 | `pnpm build` | 通过（JS 415.34 KB / gzip 126.79 KB，CSS 65.76 KB） |
+| 源码 E2E（Windows x64） | `pnpm test:e2e`（7 个套件） | 7/7 通过，2.8 分钟 |
+| 打包 | `pnpm dist:win` | 通过，约 4.6 分钟（产出 NSIS 安装包与便携版，均未签名） |
+| 打包产物 E2E | `node scripts/test-package.mjs`（`win-unpacked`） | 7/7 通过，2.8 分钟 |
+| 便携版 | `pnpm test:portable` | 5/5 检查点通过，约 12s |
+| 安装器 | `powershell -File scripts/test-installer.ps1` | **未执行**：本机桌面已有 `SaveHub.lnk`，脚本的保护条件按设计直接拒绝（脚本在 PowerShell 5.1 下能正常解析） |
+| 测试残留 | 检查 `.test-data/` | 所有套件结束后没有残留夹具目录 |
+
+> [!NOTE]
+> 和 macOS 一样，现有用例在 Windows 上全部通过。下面复现出来的问题，现有用例都覆盖不到：文件被占用、Junction、高 DPI 工作区、Win32 文件名规范化。
+
+### 7.2 原有条目的 Windows 复核结论
+
+| 编号 | 结论 | Windows 实测证据 | 对原建议的补充 |
+| --- | --- | --- | --- |
+| C1 | **成立，已复现** | ① 存档目录里有文件被别的进程打开时，目录 `rename` 返回 `EPERM`。即使是 Node 自己的 `fs.open` 句柄（libuv 带 `FILE_SHARE_DELETE`）也一样会挡住，所以游戏、OneDrive、Defender、资源管理器预览，只要还在读文件就会挡住读档。② 游戏持有 `saves/slot1.sav` 时调用 `restoreSnapshot`：**37 ms 内**失败，没有任何重试，提示是中英混杂的「读档未完成，原存档已保留或恢复。EPERM: operation not permitted, rename '…\game\saves' -> '…\.savehub-restore-<uuid>\previous\saves'」；实时存档没有变化，释放占用后重试成功。③ 安装后新文件被短暂占用，同时后续步骤失败：回滚的 `rename(target, failed)` 也报 `EPERM`，返回 `storage.restoreRollbackFailed`，游戏进入 `blockedGames`。**此时用户的实时进度只在 `.savehub-restore-<uuid>/previous/` 里**；释放占用后 `createSnapshot` 仍报 `storage.gameRecoveryBlocked`；模拟重启（新建 `SaveStore().init()`）后启动恢复成功，进度复原 | 除了原文列出的位置，以下 rename 也没有重试：[classified-logger.mjs#L188](file:///c:/Users/Limbo/Desktop/SaveHub/electron/classified-logger.mjs#L188)、[snapshot-export.mjs#L202](file:///c:/Users/Limbo/Desktop/SaveHub/electron/snapshot-export.mjs#L202)、[recovery.mjs#L126](file:///c:/Users/Limbo/Desktop/SaveHub/electron/recovery.mjs#L126)。③ 中的占用只有 4 秒，按原建议给回滚加 2~3 秒的有界重试，就能避免熔断和重启。另外 `serializeError` 映射 EPERM 时只带出 `path`，没有带出 `dest`，排查时看不到目标路径 |
+| C2 | **成立，Windows 上更严重** | `lstat` 会把 Junction 识别成 `isSymbolicLink() === true`。实测：游戏根目录在 Junction 下时备份被拒；**数据目录（`userData` / `SAVEHUB_DATA_DIR`）在 Junction 下时 `SaveStore.init()` 直接抛 `storage.symlinkNotSupported`**（[storage.mjs#L174](file:///c:/Users/Limbo/Desktop/SaveHub/electron/storage.mjs#L174)），由 [main.mjs#L88-L91](file:///c:/Users/Limbo/Desktop/SaveHub/electron/main.mjs#L88-L91) 弹出启动错误后退出。常规路径 `AppData\Roaming`、`Saved Games`、`Documents` 都能通过；旧式路径 `C:\Documents and Settings\…`、`%USERPROFILE%\Application Data` 会被拒 | 用 Junction 把整个 `C:\Users\<name>` 或 `%APPDATA%` 迁到其他盘的用户**根本打不开应用**，所以 C2 在 Windows 上应当按启动阻断处理。数据目录也要走 `realpath` 规范化后再校验，并在启动错误对话框里说明原因 |
+| C3 | **成立，已复现（模拟缩放）** | 本机 100% 缩放下没有问题。用 `--force-device-scale-factor=2` 把工作区模拟成 1280×696 DIP：窗口被系统钳到 1280×720，**底部超出工作区 24 DIP**；再调用 `setBounds(1000×600)` 仍停在 1060×721，无法缩进工作区。用 1.5 模拟（工作区 1707×928）时窗口被钳到 1440×929 | Windows 只会把初始窗口钳到显示器尺寸，不会钳到工作区。真实的 1080p@150% 任务栏有 48 DIP，遮挡会达到约 48 DIP。现有 E2E 只在 1060×720 下检查布局，从不对照工作区 |
+| C4 | **成立，但后果要更正** | 在 Windows 上，Node 的 `fs` 会把绝对路径转成 `\\?\` 命名空间，绕过 Win32 规范化。实测 Node 能原样创建 `trail␠`、`dot.`、`COM0`、`nul.txt`，而 `cmd`（Win32）对同样的名字得到的是 `trail`、`dot`。`Icon\r` 在 NTFS 上无法创建（返回 `ENOENT`）。在 Windows 本地目录里放一个通过 `\\?\` 创建的 `dot.`，整次备份都会以 `storage.unsafeRelativePath` 失败，提示「请填写根目录下的相对路径」，而这个文件并不是用户填写的 | 更正原文第 196 行的推断：macOS 快照里的 `trail␠` 在 Windows 上恢复时，**不会**失败，也**不会**触发 `postRestoreVerifyFailed`。SaveHub 会原样写出带空格的文件名，Node 回读校验能通过，读档显示成功，但游戏和资源管理器用 Win32 路径找不到、也很难删除这个文件（静默的数据可用性问题）。含 `Icon\r` 的快照在复制到暂存区时就会失败，在 Windows 上整份都无法恢复。建议在 `inventory` 阶段按「原名」校验，失败时用独立错误码报出具体文件名 |
+| C5 | Windows 不涉及 | `window-all-closed` 在非 darwin 平台直接 `app.quit()` | — |
+| C6 | **Windows 侧降为 P3** | 用 `desktopCapturer` 截取窗口：`#f6f5f000` 这种透明 overlay 在 Windows 11 上渲染正常，`ink` 和 `cyber` 主题下都直接透出主题背景；`symbolColor #75786d` 在 `cyber` 背景 `#111220` 上的对比度约 4:1，看得清 | 剩下的问题是悬停底色和启动时的浅色底闪烁（这两项无法自动截取），原建议不变 |
+| C7 | **成立，已复现** | Chromium 能编码出 WebP，但 `nativeImage.createFromPath(*.webp).isEmpty() === true`，用户会看到「图片无效」；PNG（1024²）和 ICO（256²）正常 | macOS 侧仍待实测 |
+| C8 | **成立** | [main.mjs#L20](file:///c:/Users/Limbo/Desktop/SaveHub/electron/main.mjs#L20) 只认 `SAVEHUB_DATA_DIR`；README 没有说明便携版的数据位置；`portable-smoke.mjs` 总是注入 `SAVEHUB_DATA_DIR`（[#L47](file:///c:/Users/Limbo/Desktop/SaveHub/scripts/portable-smoke.mjs#L47)），**测试从结构上就测不到默认数据位置** | 定方案后，加一条不注入 `SAVEHUB_DATA_DIR` 的便携版用例，断言实际 `userData`（在 Windows Sandbox 或 CI 上运行，避免污染开发机的 `%APPDATA%\SaveHub`） |
+| C9 | **成立** | `Get-AuthenticodeSignature` 对安装包返回 `NotSigned`，README 没有 SmartScreen 说明。本机 `LongPathsEnabled=0`：Node 能创建并写入 309 字符的路径，`cmd /c type` 对同一路径报「系统找不到指定的路径」。本机（中文系统）已安装 KaiTi | 第 4 条在 Windows 上实测成立：SaveHub 生成的超长路径，用户用系统工具无法手动清理。字体：英文版 Windows 需要可选功能「中文(简体)补充字体」才有 KaiTi，回退规则要按 macOS 的建议一起处理 |
+| T1 | **补充证据** | Windows 覆盖率中 `fs-utils.mjs` L137-153（darwin 分支）为 0。PR 检查只在 Windows 上跑，macOS 专属分支在 PR 阶段既没有执行也没有覆盖率 | — |
+| T5 | Windows 上暂未观察到 | 全部单元测试和 E2E 结束后 `.test-data/` 没有残留目录 | 原建议保留，作为防御性改进 |
+| T6 | 成立 | Windows 覆盖率输出中同样出现 `remediation.test.mjs:37` 的预期内堆栈 | — |
+| 3.3 | Windows 侧没有新问题 | `importMatches` 和 `within()` 在 win32 下都折叠大小写，行为一致。NTFS 不做 Unicode 归一化，NFC 折叠只会更保守 | — |
+
+### 7.3 Windows 复核新增问题
+
+#### C12 · P1 · 回滚后暂存目录（含整份快照副本）永久残留在游戏存档目录
+
+- 证据：回滚成功后，[restore-transaction.mjs#L253-L255](file:///c:/Users/Limbo/Desktop/SaveHub/electron/restore-transaction.mjs#L253-L255) 会刻意保留 `stage` 和事务日志「供诊断」；而启动恢复对 `rolled-back` 状态直接 `return`（[#L272](file:///c:/Users/Limbo/Desktop/SaveHub/electron/restore-transaction.mjs#L272)），全工程没有任何地方回收它们。实测：
+  - 游戏占用导致读档失败一次后，`<游戏根目录>/.savehub-restore-<uuid>/next/` 中留下整份快照副本；之后重试读档成功，它仍然在。
+  - 回滚失败、重启恢复后，同一个暂存目录里又多出 `failed/saves/…`。
+  - `data/transactions/<uuid>.json` 同样永久保留。
+- 影响：C1 说明在 Windows 上读档失败很常见（游戏没关、同步盘、杀软），每失败一次就在**用户的游戏存档目录**里多留一份快照大小的数据。Windows 不会因为文件名以点开头就隐藏它，资源管理器里直接可见；如果存档目录被 Steam Cloud 或 OneDrive「文档」同步，还会被上传；会枚举存档目录的游戏也可能把它当成异常存档；目录嵌套较深时，还会碰到 C9 的 260 字符问题，手动删不掉。
+- 建议：
+  1. 回滚成功后删除 `next/`；把 `failed/`（如果有）连同事务日志移到资料库 `data/diagnostics/<txId>/`，再删除游戏目录里的暂存区。诊断目录按数量或天数轮转。
+  2. 启动恢复对 `rolled-back` 状态也做同样的回收（先 `assertTreeNoLinks`），清理旧版本留下的残留。
+  3. 事务进行期间，在 Windows 上给暂存目录加隐藏属性，并在 UI 的失败提示中说明「已清理临时文件」或者给出诊断目录位置。
+- 用例：注入 `platform:'win32'`，让 `rename(target, previous)` 抛 `EPERM` → `restoreSnapshot` 抛 `storage.restoreAborted` 后，断言游戏根目录下不存在 `.savehub-restore-*`，`transactions/` 中没有残留的 `rolled-back` 日志，诊断目录中有对应记录。
+
+#### C13 · P2 · Windows 保留设备名校验不完整，子文件名的报错有误导
+
+- 证据：[fs-utils.mjs#L78](file:///c:/Users/Limbo/Desktop/SaveHub/electron/fs-utils.mjs#L78) 与 [fs-utils.mjs#L639](file:///c:/Users/Limbo/Desktop/SaveHub/electron/fs-utils.mjs#L639) 只拦 `con|prn|aux|nul|com[1-9]|lpt[1-9]`。实测 `cleanItems` 会放行 `COM¹`、`LPT²`、`CONIN$`、`CONOUT$`、`COM0`、`LPT0`、`con .txt`。在本机用 `cmd` 创建时，`COM¹`、`LPT²`、`CONIN$` **没有生成文件**（被当成设备打开）；`COM0`/`LPT0` 在 26200 上能作为普通文件创建，但微软文档仍把它们列为保留名，旧版本系统会当成设备。SaveHub 自己通过 `\\?\` 可以写出这些名字（见 C4），游戏用 Win32 路径打开时却会打开设备。
+- 另外，子文件名校验沿用了「条目路径」的提示「路径不安全或无法跨平台使用：dot.。请填写根目录下的相对路径」，但这个名字是用户存档目录里本来就有的文件，并不是用户填写的。
+- 建议：
+  - 保留名正则统一放进 `shared/`，改为 `/^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])(?:\s*\.|$)/i`，`cleanItems` 和 `exportName` 共用。
+  - `inventory` 中子文件名不合法时，抛出独立错误码（例如 `storage.unsafeFileName { path }`），提示「存档目录中的文件名在 Windows 上不可用：saves/dot.」，并提供「跳过此文件」的选择（和 C4 的忽略表合并实现）。
+
+#### C14 · P3 · NTFS 文件 ID 超出 Number 精度
+
+- 证据：在 `node_modules/.pnpm` 和 `%APPDATA%` 中抽样 4110 个条目，有 118 个 `ino` 大于 2^53（NTFS 文件 ID = 16 位序列号 + 48 位 MFT 索引，序列号 ≥ 32 时 Number 就会丢失低位）。抽样中没有出现碰撞。用 Number 比较 `ino` 的位置：[fs-utils.mjs#L166](file:///c:/Users/Limbo/Desktop/SaveHub/electron/fs-utils.mjs#L166)、[#L177](file:///c:/Users/Limbo/Desktop/SaveHub/electron/fs-utils.mjs#L177)（`withinOnDisk`）、[#L518](file:///c:/Users/Limbo/Desktop/SaveHub/electron/fs-utils.mjs#L518)（`copyRecords` 检测源文件是否被替换）。
+- 影响：碰撞时，`withinOnDisk` 会误报「与资料库重叠」（偏保守），`copyRecords` 则漏检源文件被替换。概率低，但属于 Windows 特有的正确性隐患。
+- 建议：身份比较统一用 `lstat(..., { bigint: true })`（已有 `statBigIntMaybe`），比较 `dev`/`ino` 的 BigInt 值。
+
+#### E6 · P2 · 同版本重复打包会覆盖已发布产物，校验文件随之失效
+
+- 证据：`directories.output` 写死为 `release/1.1.5`（[package.json#L67](file:///c:/Users/Limbo/Desktop/SaveHub/package.json#L67)）。本次复核在 `56dfcb1` 上执行 `pnpm dist:win`，覆盖了 2026-11-06 基于 `v1.1.5`（`e616e63`）构建的安装包和便携版。目录中的 `SHA256SUMS.txt` 记录的安装包哈希是 `c26b7514…`，当前文件是 `e2c2417b…`；`audit-win32-x64.json`、`发布说明.md` 也都还是旧内容。
+- 影响：本地 `release/<version>` 不再对应已发布的版本，校验和与审计记录对不上；如果有人从本地目录重新上传附件，发布出去的就是未打标签的构建。
+- 建议：在 E1 的基础上，非标签构建输出到 `release/${version}-dev`（或附加 `git describe` 后缀）；`dist:*` 发现目标目录已有 `SHA256SUMS.txt`、而 `HEAD` 不在对应标签上时直接拒绝；`pnpm checksums` 增加校验模式，发现现有校验和与文件不一致时报错。
+
+#### T8 · P3 · Windows 本地复跑门槛
+
+- 默认执行策略下，在 Windows PowerShell 5.1 中执行 `pnpm …` 会报 `pnpm.ps1 cannot be loaded because running scripts is disabled`，需要改用 `pnpm.cmd`，或先执行 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`。
+- 第 6 节的命令是 bash 写法（`\` 续行、`&&`）。在 `cmd` 中，`--test-coverage-include='electron/**'` 的单引号会被当成字面量，导致匹配不到任何文件。
+- CI 用 `pwsh` 运行安装器脚本，而 Windows 默认只有 PowerShell 5.1（本次实测脚本能在 5.1 下解析）。
+- `test-installer.ps1` 发现已安装的 SaveHub 或已有快捷方式时会拒绝运行，这是正确的保护，但也意味着开发机上基本无法跑安装器回归。建议在仓库中提供 Windows Sandbox 配置（`.wsb`，把 `release/` 只读映射进去，启动后运行脚本），或在 README 中写明「安装器回归只在 CI 或干净虚拟机上运行」。
+
+#### 补充测试用例（可直接由本次探针改写）
+
+| 测试点 | 前置条件 | 操作 | 可验证的预期 |
+| --- | --- | --- | --- |
+| Junction 下的数据目录 | `fs.symlink(real, link, 'junction')`（无需管理员） | `new SaveStore(link/data).init()` | 修复 C2 后能启动，并以 `realpath` 存储；修复前抛 `storage.symlinkNotSupported` |
+| 真实占用（仅 win32） | 子进程以 `FileShare.Read` 打开存档文件 3 秒 | `restoreSnapshot` | 修复 C1 后在重试窗口内成功；任何情况下实时存档逐字节不变，且没有 `.savehub-restore-*` 残留（C12） |
+| `\\?\` 文件名（仅 win32） | 用 `\\?\` 前缀创建 `trail␠`、`dot.` | `createSnapshot` | 抛 `storage.unsafeFileName`（或按忽略表跳过并计数），提示中包含相对路径 |
+| 保留名 | — | `cleanItems(['COM¹'])`、`['CONIN$']`、`['con .txt']`、`exportName('CONOUT$')` | 前三个被拒；导出目录名带 `_` 前缀 |
+| 工作区自适应 | `--force-device-scale-factor=2` 启动 | 读取 `getBounds()` 和 `workArea` | 窗口完全在工作区内，`minHeight` ≤ 工作区高度 |
+| WebP 图标 | 选择 `.webp` 文件 | `pickIcon` | 修复 C7 后要么不提供 WebP 选项，要么能成功转成 PNG |
+
+### 7.4 Windows 复核后的执行顺序调整
+
+- C12 并入第 1 批（与 C1 同一处代码，一起改，一起测）；C13 并入第 2 批（与 C4 的忽略表、错误码一起实现）。
+- C2 在 Windows 上会阻断启动，建议和 C1 同等优先级处理。
+- C6 在 Windows 侧降为 P3；C14、T8 放进第 4 批；E6 和 E1 一起处理。
+- 第 2 批完成标准补充一条：数据目录位于 Junction 下时应用能正常启动。
+
+### 7.5 Windows 复跑命令
+
+```powershell
+# 在 Windows PowerShell 5.1 中用 pnpm.cmd 绕开执行策略（或先 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned）
+pnpm.cmd lint; pnpm.cmd format:check; pnpm.cmd check:contracts; pnpm.cmd typecheck
+pnpm.cmd test
+node --test --experimental-test-coverage `
+  --test-coverage-include='electron/**' --test-coverage-include='shared/**' tests/*.test.mjs
+
+# 源码 E2E（需要已登录的桌面会话）
+pnpm.cmd build; pnpm.cmd test:e2e
+
+# 打包产物回归（注意：会覆盖 release/<version>，见 E6）
+pnpm.cmd dist:win; node scripts/test-package.mjs; pnpm.cmd test:portable
+# 安装器回归：只在没有安装 SaveHub、桌面和开始菜单都没有 SaveHub.lnk 的干净环境中运行
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1
 ```
